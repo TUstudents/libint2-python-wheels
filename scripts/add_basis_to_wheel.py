@@ -75,6 +75,17 @@ def add_basis_to_wheel(wheel_path: Path, basis_dir: Path, output_dir: Path) -> P
         
         print(f"  Copied basis files to {basis_dest.relative_to(unpack_dir)}")
         
+        # Add __init__.py to make the package importable
+        # The extension module is named libint2.cpython-*.so, we need to re-export from it
+        init_path = pkg_dir / "__init__.py"
+        if not init_path.exists():
+            init_content = '''# Auto-generated __init__.py for libint2 package
+# Re-export everything from the C++ extension module
+from .libint2 import *
+'''
+            init_path.write_text(init_content)
+            print(f"  Added __init__.py to re-export from extension module")
+        
         # Update the RECORD file
         dist_info = None
         for d in unpack_dir.iterdir():
@@ -101,6 +112,13 @@ def add_basis_to_wheel(wheel_path: Path, basis_dir: Path, output_dir: Path) -> P
                     digest = sha256_digest(src_file)
                     size = src_file.stat().st_size
                     record_lines.append(f"{rel_path},sha256={digest},{size}")
+            
+            # Add __init__.py entry if we created it
+            if init_path.exists():
+                rel_path = init_path.relative_to(unpack_dir)
+                digest = sha256_digest(init_path)
+                size = init_path.stat().st_size
+                record_lines.append(f"{rel_path},sha256={digest},{size}")
             
             # Add RECORD entry (no hash)
             record_lines.append(f"{dist_info.name}/RECORD,,")
