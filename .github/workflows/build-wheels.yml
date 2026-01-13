@@ -143,8 +143,16 @@ jobs:
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
           mkdir -p build && cd build
           
-          # Explicitly hint Python paths for manylinux
-          PY_ROOT=$(dirname $(dirname ${{ steps.python.outputs.PYTHON }}))
+          # Get Python paths
+          PY_INC=$(${{ steps.python.outputs.PYTHON }} -c "import sysconfig; print(sysconfig.get_path('include'))")
+          # In manylinux, LIBDIR might not point to where the .so/.a is for build purposes
+          # The libs are often in /opt/python/cp3X-cp3X/lib
+          PY_PREFIX=$(dirname $(dirname ${{ steps.python.outputs.PYTHON }}))
+          PY_LIB_DIR="${PY_PREFIX}/lib"
+          
+          echo "Python Include: $PY_INC"
+          echo "Python Lib Dir: $PY_LIB_DIR"
+          ls -la $PY_LIB_DIR
           
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
@@ -154,7 +162,9 @@ jobs:
             -DBUILD_SHARED_LIBS=ON \
             -DLIBINT2_PYTHON=ON \
             -DPython_EXECUTABLE=${{ steps.python.outputs.PYTHON }} \
-            -DPython_ROOT_DIR=$PY_ROOT \
+            -DPython_ROOT_DIR=$PY_PREFIX \
+            -DPython_INCLUDE_DIR=$PY_INC \
+            -DPython_LIBRARY_DIRS=$PY_LIB_DIR \
             -DPython_FIND_STRATEGY=LOCATION
           
           cmake --build . --target libint2-python --parallel $(nproc)
