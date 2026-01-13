@@ -124,9 +124,9 @@ jobs:
         run: |
           yum install -y cmake3 boost-devel eigen3-devel gmp-devel wget tar gzip jq
           ln -sf /usr/bin/cmake3 /usr/local/bin/cmake || true
-      
-      - name: Install Python build dependencies
-        run: |
+          
+          # Install Python development headers for the target Python version
+          # In manylinux, we need to ensure the Python has development files
           ${{ steps.python.outputs.PYTHON }} -m pip install --upgrade pip
           ${{ steps.python.outputs.PYTHON }} -m pip install build wheel scikit-build-core "pybind11>=3.0.0" numpy
       
@@ -153,10 +153,27 @@ jobs:
           # Find pybind11 cmake path
           PYBIND11_DIR=$(${{ steps.python.outputs.PYTHON }} -c "import pybind11; print(pybind11.get_cmake_dir())")
           
+          # Find the actual Python library file
+          PY_VER=$(${{ steps.python.outputs.PYTHON }} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+          PY_LIBNAME="libpython${PY_VER}.so"
+          
+          # In manylinux, the library might be in the lib directory
+          if [ -f "${PY_LIB_DIR}/${PY_LIBNAME}" ]; then
+            PY_LIBRARY="${PY_LIB_DIR}/${PY_LIBNAME}"
+          elif [ -f "${PY_LIB_DIR}/libpython${PY_VER}m.so" ]; then
+            PY_LIBRARY="${PY_LIB_DIR}/libpython${PY_VER}m.so"
+          else
+            # Try to find it
+            PY_LIBRARY=$(find ${PY_PREFIX} -name "libpython*.so" -o -name "libpython*.a" 2>/dev/null | head -1)
+          fi
+          
           echo "Python Include: $PY_INC"
           echo "Python Lib Dir: $PY_LIB_DIR"
+          echo "Python Library: $PY_LIBRARY"
           echo "pybind11 Dir: $PYBIND11_DIR"
-          ls -la $PY_LIB_DIR
+          
+          # List what's in the lib directory
+          find ${PY_PREFIX} -name "libpython*" 2>/dev/null || true
           
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
@@ -168,7 +185,7 @@ jobs:
             -DPython_EXECUTABLE=${{ steps.python.outputs.PYTHON }} \
             -DPython_ROOT_DIR=$PY_PREFIX \
             -DPython_INCLUDE_DIR=$PY_INC \
-            -DPython_LIBRARY_DIRS=$PY_LIB_DIR \
+            -DPython_LIBRARY=$PY_LIBRARY \
             -DPython_FIND_STRATEGY=LOCATION \
             -Dpybind11_DIR=$PYBIND11_DIR
           
