@@ -28,9 +28,8 @@ on:
     tags:
       - 'v*'
   
-  # Weekly builds to catch any issues
   schedule:
-    - cron: '0 2 * * 0'  # Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
 
 env:
   LIBINT_VERSION: ${{ inputs.libint_version || '2.11.2' }}
@@ -54,7 +53,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set Python version paths
+      - name: Set Python path
         id: python
         run: |
           case "${{ matrix.python-version }}" in
@@ -65,7 +64,8 @@ jobs:
             3.13) PYTHON_PATH="/opt/python/cp313-cp313/bin/python" ;;
           esac
           echo "PYTHON=${PYTHON_PATH}" >> $GITHUB_OUTPUT
-          echo "PYTHON_VERSION=${{ matrix.python-version }}" >> $GITHUB_OUTPUT
+          # Add Python bin directory to PATH for cmake to find
+          echo "$(dirname ${PYTHON_PATH})" >> $GITHUB_PATH
       
       - name: Install system dependencies
         run: |
@@ -78,72 +78,73 @@ jobs:
             tar \
             gzip
           
-          # Ensure cmake is available as 'cmake'
           ln -sf /usr/bin/cmake3 /usr/local/bin/cmake || true
       
-      - name: Cache libint2 build
+      - name: Install Python build dependencies
+        run: |
+          ${{ steps.python.outputs.PYTHON }} -m pip install --upgrade pip
+          ${{ steps.python.outputs.PYTHON }} -m pip install \
+            build \
+            wheel \
+            scikit-build-core \
+            "pybind11>=3.0.0" \
+            numpy
+      
+      - name: Cache libint2 source
         uses: actions/cache@v4
-        id: cache-libint
+        id: cache-source
         with:
-          path: /tmp/libint2-install
-          key: libint2-${{ env.LIBINT_VERSION }}-linux-x86_64-py${{ matrix.python-version }}-v2-${{ hashFiles('scripts/build_libint2.sh') }}
+          path: /tmp/libint-${{ env.LIBINT_VERSION }}
+          key: libint2-source-${{ env.LIBINT_VERSION }}
       
-      - name: Download and build libint2
-        if: steps.cache-libint.outputs.cache-hit != 'true'
+      - name: Download libint2 source
+        if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
-          chmod +x scripts/build_libint2.sh
-          PYTHON=${{ steps.python.outputs.PYTHON }} \
-          LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
-          INSTALL_PREFIX=/tmp/libint2-install \
-            scripts/build_libint2.sh
+          cd /tmp
+          wget -q "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz"
+          tar xzf libint-${{ env.LIBINT_VERSION }}.tgz
       
-      - name: Debug - Show installed files
+      - name: Build wheel using scikit-build-core
         run: |
-          echo "=== Installed files ==="
-          find /tmp/libint2-install -type f | head -50
-          echo ""
-          echo "=== .so files ==="
-          find /tmp/libint2-install -name "*.so*" -type f
-          echo ""
-          echo "=== Python site-packages ==="
-          find /tmp/libint2-install -path "*/site-packages/*" -type f 2>/dev/null || echo "No site-packages found"
-      
-      - name: Build Python wheel
-        run: |
-          ${{ steps.python.outputs.PYTHON }} -m pip install --upgrade pip wheel
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}
           
-          # Build wheel using our custom script
-          ${{ steps.python.outputs.PYTHON }} scripts/build_wheel.py \
-            --install-prefix /tmp/libint2-install \
-            --output-dir /tmp/dist \
-            --version "${{ env.LIBINT_VERSION }}" \
-            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
+          # Build the wheel from the python directory
+          cd python
+          
+          # Configure and build using scikit-build-core
+          ${{ steps.python.outputs.PYTHON }} -m build --wheel \
+            --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
+            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }}
           
           echo "=== Built wheel ==="
-          ls -la /tmp/dist/
+          ls -la dist/
           
           # Repair wheel for manylinux compliance
           mkdir -p /tmp/wheels
-          auditwheel repair /tmp/dist/*.whl -w /tmp/wheels/
+          auditwheel repair dist/*.whl -w /tmp/wheels/
           
           echo "=== Repaired wheel ==="
           ls -la /tmp/wheels/
       
       - name: Test wheel
         run: |
-          # Create a fresh environment for testing
+          # Install in a clean environment
           ${{ steps.python.outputs.PYTHON }} -m pip install /tmp/wheels/*.whl
           
-          # Test import
-          ${{ steps.python.outputs.PYTHON }} -c "import libint2; print(f'libint2 version: {libint2.__version__}')"
-          
-          # Run basic functionality test
+          # Test import and basic functionality
           ${{ steps.python.outputs.PYTHON }} -c "
           import libint2
-          libint2.initialize()
-          print('libint2 initialized successfully')
-          libint2.finalize()
-          print('libint2 finalized successfully')
+          print(f'libint2 imported successfully')
+          print(f'MAX_AM = {libint2.MAX_AM}')
+          
+          # Test creating objects
+          atom = libint2.Atom(1, [0.0, 0.0, 0.0])
+          print('Created Atom')
+          
+          shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
+          print(f'Created Shell with {shell.size()} basis functions')
+          
+          print('All tests passed!')
           "
       
       - name: Upload wheel artifact
@@ -177,46 +178,44 @@ jobs:
         run: |
           brew install cmake boost eigen gmp
       
-      - name: Cache libint2 build
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            build \
+            wheel \
+            scikit-build-core \
+            "pybind11>=3.0.0" \
+            numpy \
+            delocate
+      
+      - name: Cache libint2 source
         uses: actions/cache@v4
-        id: cache-libint
+        id: cache-source
         with:
-          path: /tmp/libint2-install
-          key: libint2-${{ env.LIBINT_VERSION }}-macos-x86_64-py${{ matrix.python-version }}-v2-${{ hashFiles('scripts/build_libint2.sh') }}
+          path: /tmp/libint-${{ env.LIBINT_VERSION }}
+          key: libint2-source-${{ env.LIBINT_VERSION }}
       
-      - name: Download and build libint2
-        if: steps.cache-libint.outputs.cache-hit != 'true'
+      - name: Download libint2 source
+        if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
-          chmod +x scripts/build_libint2.sh
-          PYTHON=$(which python) \
-          LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
-          INSTALL_PREFIX=/tmp/libint2-install \
-            scripts/build_libint2.sh
+          cd /tmp
+          curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
+          tar xzf libint.tgz
       
-      - name: Debug - Show installed files
+      - name: Build wheel using scikit-build-core
         run: |
-          echo "=== Installed files ==="
-          find /tmp/libint2-install -type f | head -50
-          echo ""
-          echo "=== .so/.dylib files ==="
-          find /tmp/libint2-install -name "*.so" -o -name "*.dylib" | head -20
-      
-      - name: Build Python wheel
-        run: |
-          python -m pip install --upgrade pip wheel delocate
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
-          python scripts/build_wheel.py \
-            --install-prefix /tmp/libint2-install \
-            --output-dir /tmp/dist \
-            --version "${{ env.LIBINT_VERSION }}" \
-            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
+          python -m build --wheel \
+            --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
+            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }}
           
           echo "=== Built wheel ==="
-          ls -la /tmp/dist/
+          ls -la dist/
           
-          # Fix wheel for macOS
           mkdir -p /tmp/wheels
-          delocate-wheel -w /tmp/wheels/ /tmp/dist/*.whl
+          delocate-wheel -w /tmp/wheels/ dist/*.whl
           
           echo "=== Delocated wheel ==="
           ls -la /tmp/wheels/
@@ -224,13 +223,14 @@ jobs:
       - name: Test wheel
         run: |
           python -m pip install /tmp/wheels/*.whl
-          python -c "import libint2; print(f'libint2 version: {libint2.__version__}')"
           python -c "
           import libint2
-          libint2.initialize()
-          print('libint2 initialized successfully')
-          libint2.finalize()
-          print('libint2 finalized successfully')
+          print(f'libint2 imported successfully')
+          print(f'MAX_AM = {libint2.MAX_AM}')
+          atom = libint2.Atom(1, [0.0, 0.0, 0.0])
+          shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
+          print(f'Created Shell with {shell.size()} basis functions')
+          print('All tests passed!')
           "
       
       - name: Upload wheel artifact
@@ -264,45 +264,44 @@ jobs:
         run: |
           brew install cmake boost eigen gmp
       
-      - name: Cache libint2 build
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            build \
+            wheel \
+            scikit-build-core \
+            "pybind11>=3.0.0" \
+            numpy \
+            delocate
+      
+      - name: Cache libint2 source
         uses: actions/cache@v4
-        id: cache-libint
+        id: cache-source
         with:
-          path: /tmp/libint2-install
-          key: libint2-${{ env.LIBINT_VERSION }}-macos-arm64-py${{ matrix.python-version }}-v2-${{ hashFiles('scripts/build_libint2.sh') }}
+          path: /tmp/libint-${{ env.LIBINT_VERSION }}
+          key: libint2-source-${{ env.LIBINT_VERSION }}
       
-      - name: Download and build libint2
-        if: steps.cache-libint.outputs.cache-hit != 'true'
+      - name: Download libint2 source
+        if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
-          chmod +x scripts/build_libint2.sh
-          PYTHON=$(which python) \
-          LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
-          INSTALL_PREFIX=/tmp/libint2-install \
-            scripts/build_libint2.sh
+          cd /tmp
+          curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
+          tar xzf libint.tgz
       
-      - name: Debug - Show installed files
+      - name: Build wheel using scikit-build-core
         run: |
-          echo "=== Installed files ==="
-          find /tmp/libint2-install -type f | head -50
-          echo ""
-          echo "=== .so/.dylib files ==="
-          find /tmp/libint2-install -name "*.so" -o -name "*.dylib" | head -20
-      
-      - name: Build Python wheel
-        run: |
-          python -m pip install --upgrade pip wheel delocate
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
-          python scripts/build_wheel.py \
-            --install-prefix /tmp/libint2-install \
-            --output-dir /tmp/dist \
-            --version "${{ env.LIBINT_VERSION }}" \
-            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
+          python -m build --wheel \
+            --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
+            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }}
           
           echo "=== Built wheel ==="
-          ls -la /tmp/dist/
+          ls -la dist/
           
           mkdir -p /tmp/wheels
-          delocate-wheel -w /tmp/wheels/ /tmp/dist/*.whl
+          delocate-wheel -w /tmp/wheels/ dist/*.whl
           
           echo "=== Delocated wheel ==="
           ls -la /tmp/wheels/
@@ -310,13 +309,14 @@ jobs:
       - name: Test wheel
         run: |
           python -m pip install /tmp/wheels/*.whl
-          python -c "import libint2; print(f'libint2 version: {libint2.__version__}')"
           python -c "
           import libint2
-          libint2.initialize()
-          print('libint2 initialized successfully')
-          libint2.finalize()
-          print('libint2 finalized successfully')
+          print(f'libint2 imported successfully')
+          print(f'MAX_AM = {libint2.MAX_AM}')
+          atom = libint2.Atom(1, [0.0, 0.0, 0.0])
+          shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
+          print(f'Created Shell with {shell.size()} basis functions')
+          print('All tests passed!')
           "
       
       - name: Upload wheel artifact
@@ -360,8 +360,6 @@ jobs:
             
             ### Installation
             
-            Download the appropriate wheel for your platform and Python version, then:
-            
             ```bash
             pip install libint2-${{ env.LIBINT_VERSION }}-<platform>.whl
             ```
@@ -382,10 +380,6 @@ jobs:
             
             - Linux: 3.9, 3.10, 3.11, 3.12, 3.13
             - macOS: 3.10, 3.11, 3.12, 3.13
-            
-            ### Numpy Constraint
-            
-            These wheels require `numpy${{ env.NUMPY_CONSTRAINT }}`.
           files: wheels/*.whl
           draft: false
           prerelease: false

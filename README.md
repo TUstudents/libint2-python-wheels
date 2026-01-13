@@ -8,7 +8,7 @@ Pre-built Python wheels for [libint2](https://github.com/evaleev/libint) - a hig
 
 ### From GitHub Releases
 
-Download the appropriate wheel for your platform and Python version from the [Releases page](https://github.com/YOUR_USERNAME/libint2-python-wheels/releases), then install:
+Download the appropriate wheel for your platform and Python version from the [Releases page](https://github.com/TUstudents/libint2-python-wheels/releases), then install:
 
 ```bash
 pip install libint2-2.11.2-cp312-cp312-manylinux_2_28_x86_64.whl
@@ -43,42 +43,64 @@ uv add "libint2 @ https://github.com/TUstudents/libint2-python-wheels/releases/d
 ```python
 import libint2
 
-# Initialize the library
-libint2.initialize()
+# Library is automatically initialized on import
+print(f"Maximum angular momentum: {libint2.MAX_AM}")
 
-# Use libint2 for your calculations
-# ... your code here ...
+# Create atoms (Z, [x, y, z])
+atoms = [
+    libint2.Atom(1, [0.0, 0.0, 0.0]),      # H at origin
+    libint2.Atom(1, [0.0, 0.0, 1.4]),      # H at 1.4 bohr
+]
 
-# Finalize when done
-libint2.finalize()
+# Create basis set
+basis = libint2.BasisSet("sto-3g", atoms)
+print(f"Number of basis functions: {basis.nbf}")
+
+# Create integral engines
+overlap_engine = libint2.overlap()
+kinetic_engine = libint2.kinetic()
+
+# Compute overlap matrix for entire basis
+S = overlap_engine.compute(basis, basis)
+print(f"Overlap matrix shape: {S.shape}")
+
+# Compute kinetic energy matrix
+T = kinetic_engine.compute(basis, basis)
+
+# For nuclear attraction, set the charges first
+nuclear_engine = libint2.nuclear([(1.0, [0.0, 0.0, 0.0]), (1.0, [0.0, 0.0, 1.4])])
+V = nuclear_engine.compute(basis, basis)
+
+# Compute two-electron integrals
+coulomb_engine = libint2.coulomb()
+# For shell quartets:
+# eri = coulomb_engine.compute(shell_a, shell_b, shell_c, shell_d)
+# For full basis:
+# eri = coulomb_engine.compute(basis, basis, basis, basis)
 ```
 
-### Example: Computing Overlap Integrals
+### Shell-by-Shell Computation
 
 ```python
 import libint2
 import numpy as np
 
-# Initialize
-libint2.initialize()
+atoms = [libint2.Atom(1, [0.0, 0.0, 0.0]), libint2.Atom(1, [0.0, 0.0, 1.4])]
+basis = libint2.BasisSet("sto-3g", atoms)
 
-# Create a basis set
-# (Example - actual API depends on libint2 Python bindings)
-basis = libint2.BasisSet.build(
-    atoms=[("H", [0, 0, 0]), ("H", [0, 0, 1.4])],
-    basis="sto-3g"
-)
+engine = libint2.overlap()
 
-# Compute overlap integrals
-engine = libint2.Engine(libint2.Operator.overlap, basis.max_nprim(), basis.max_l())
-# ... compute integrals ...
-
-libint2.finalize()
+# Iterate over shell pairs
+for i, shell_i in enumerate(basis):
+    for j, shell_j in enumerate(basis):
+        result = engine.compute(shell_i, shell_j)
+        if result is not None:
+            print(f"Shell ({i},{j}): {result.shape}")
 ```
 
 ## Numpy Compatibility
 
-These wheels are built with a specific numpy version constraint <2.4 to be compatible with numba.
+These wheels are built with numpy version constraint `<2.4` to be compatible with numba.
 
 If you need a different numpy constraint, you can:
 
@@ -90,47 +112,35 @@ If you need a different numpy constraint, you can:
 ### Fork and Customize
 
 1. Fork this repository
-2. Modify `config.yml` to change build settings
-3. Push a tag like `v2.11.2` to trigger a release build
+2. Trigger a manual build from the Actions tab with custom parameters:
+   - **libint_version**: Version of libint2 to build (e.g., `2.11.2`)
+   - **numpy_constraint**: Numpy version constraint (e.g., `<2.4`)
+3. Push a tag like `v2.11.2` to create a release
 
-### Manual Trigger
+## How It Works
 
-You can manually trigger a build from the Actions tab with custom parameters:
+This repository uses the official libint2 Python bindings with [scikit-build-core](https://scikit-build-core.readthedocs.io/). The workflow:
 
-- **libint_version**: Version of libint2 to build (e.g., `2.11.2`)
-- **numpy_constraint**: Numpy version constraint (e.g., `<2.4`)
-- **publish_pypi**: Whether to publish to PyPI (requires secrets)
+1. Downloads the libint2 source tarball
+2. Uses `python -m build` with scikit-build-core to build the wheel
+3. Repairs the wheel with `auditwheel` (Linux) or `delocate` (macOS)
+4. Tests the wheel by importing and running basic operations
 
-## Build Configuration
+## License
 
-The `config.yml` file contains build settings:
+This repository (build scripts and workflows) is licensed under the MIT License.
 
-```yaml
-libint:
-  version: "2.11.2"
-  build_options:
-    max_am_eri: 6        # Maximum angular momentum for ERIs
-    max_am_onebody: 6    # Maximum angular momentum for 1-body integrals
-    eri_deriv_order: 2   # ERI derivative order
-    
-python:
-  versions:
-    linux: ["3.9", "3.10", "3.11", "3.12", "3.13"]
-    macos: ["3.10", "3.11", "3.12", "3.13"]
-  numpy_constraint: "<2.4"
-```
-
+libint2 itself is licensed under [LGPL-3.0](https://github.com/evaleev/libint/blob/master/LICENSE). The wheels contain libint2 code and are subject to LGPL-3.0.
 
 ## Credits
 
-- [libint2](https://github.com/evaleev/libint) by Edward Valeev and contributors
-- This wheel-building infrastructure is maintained by the community
+- [libint2](https://github.com/evaleev/libint) by Edward F. Valeev and contributors
+- Python bindings included in libint2
 
 ## Related Projects
 
 - [PySCF](https://github.com/pyscf/pyscf) - Python-based Simulations of Chemistry Framework
 - [Psi4](https://github.com/psi4/psi4) - Open-Source Quantum Chemistry
-- [libcint](https://github.com/sunqm/libcint) - Alternative integral library
 
 ## Troubleshooting
 
@@ -138,18 +148,17 @@ python:
 
 If you get an import error, ensure:
 
-1. You have the correct wheel for your platform (check `uname -m` on Unix)
+1. You have the correct wheel for your platform (`uname -m` on Unix)
 2. You're using a supported Python version
-3. You have numpy installed with a compatible version
+3. You have numpy installed
 
 ### Missing Basis Sets
 
-If basis sets aren't found, you can set the `LIBINT_DATA_PATH` environment variable:
+The basis set data may not be bundled in the wheel. You can:
 
-```python
-import os
-os.environ["LIBINT_DATA_PATH"] = "/path/to/basis/sets"
-```
+1. Install basis sets separately
+2. Set `LIBINT_DATA_PATH` environment variable
+3. Use explicit shell definitions instead of named basis sets
 
 ### Reporting Issues
 
