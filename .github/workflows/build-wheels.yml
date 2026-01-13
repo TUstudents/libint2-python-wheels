@@ -133,6 +133,11 @@ jobs:
           # Patch CMakeLists.txt: Development -> Development.Module
           # This avoids requiring libpython.so which doesn't exist in manylinux
           sed -i 's/Development REQUIRED/Development.Module REQUIRED/' /tmp/libint-${{ env.LIBINT_VERSION }}/python/CMakeLists.txt
+          
+          # Patch install destination: libint2 -> . to avoid double nesting
+          # scikit-build-core sets wheel.install-dir = "libint2", so we install to "."
+          sed -i 's/DESTINATION libint2/DESTINATION ./g' /tmp/libint-${{ env.LIBINT_VERSION }}/python/CMakeLists.txt
+          
           echo "Download and patch complete"
       
       - name: Build and install libint2 C++ library
@@ -254,6 +259,10 @@ jobs:
           cd /tmp
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
           tar xzf libint.tgz
+          
+          # Patch CMakeLists.txt for compatibility
+          sed -i '' 's/Development REQUIRED/Development.Module REQUIRED/' /tmp/libint-${{ env.LIBINT_VERSION }}/python/CMakeLists.txt
+          sed -i '' 's/DESTINATION libint2/DESTINATION ./g' /tmp/libint-${{ env.LIBINT_VERSION }}/python/CMakeLists.txt
       
       - name: Build and install libint2 C++ library
         run: |
@@ -352,6 +361,10 @@ jobs:
           cd /tmp
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
           tar xzf libint.tgz
+          
+          # Patch CMakeLists.txt for compatibility
+          sed -i '' 's/Development REQUIRED/Development.Module REQUIRED/' /tmp/libint-${{ env.LIBINT_VERSION }}/python/CMakeLists.txt
+          sed -i '' 's/DESTINATION libint2/DESTINATION ./g' /tmp/libint-${{ env.LIBINT_VERSION }}/python/CMakeLists.txt
       
       - name: Build and install libint2 C++ library
         run: |
