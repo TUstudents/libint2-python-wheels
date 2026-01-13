@@ -18,16 +18,16 @@ Or install directly from URL:
 
 ```bash
 # Linux x86_64, Python 3.12
-pip install "libint2 @ https://github.com/YOUR_USERNAME/libint2-python-wheels/releases/download/v2.11.2/libint2-2.11.2-cp312-cp312-manylinux_2_28_x86_64.whl"
+pip install "libint2 @ https://github.com/TUstudents/libint2-python-wheels/releases/download/v2.11.2/libint2-2.11.2-cp312-cp312-manylinux_2_28_x86_64.whl"
 
 # macOS ARM64, Python 3.12
-pip install "libint2 @ https://github.com/YOUR_USERNAME/libint2-python-wheels/releases/download/v2.11.2/libint2-2.11.2-cp312-cp312-macosx_14_0_arm64.whl"
+pip install "libint2 @ https://github.com/TUstudents/libint2-python-wheels/releases/download/v2.11.2/libint2-2.11.2-cp312-cp312-macosx_14_0_arm64.whl"
 ```
 
 ### With uv
 
 ```bash
-uv add "libint2 @ https://github.com/YOUR_USERNAME/libint2-python-wheels/releases/download/v2.11.2/libint2-2.11.2-cp312-cp312-manylinux_2_28_x86_64.whl"
+uv add "libint2 @ https://github.com/TUstudents/libint2-python-wheels/releases/download/v2.11.2/libint2-2.11.2-cp312-cp312-manylinux_2_28_x86_64.whl"
 ```
 
 ## Supported Platforms
@@ -78,7 +78,7 @@ libint2.finalize()
 
 ## Numpy Compatibility
 
-These wheels are built with a specific numpy version constraint. Check the release notes for the exact constraint (typically `numpy<2.4`).
+These wheels are built with a specific numpy version constraint <2.4 to be compatible with numba.
 
 If you need a different numpy constraint, you can:
 
@@ -158,7 +158,7 @@ os.environ["LIBINT_DATA_PATH"] = "/path/to/basis/sets"
 
 ### Reporting Issues
 
-Please report issues at: https://github.com/YOUR_USERNAME/libint2-python-wheels/issues
+Please report issues at: https://github.com/TUstudents/libint2-python-wheels/issues
 
 Include:
 - Your operating system and architecture
