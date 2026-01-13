@@ -1,6 +1,6 @@
 # libint2-python-wheels
 
-[![Build Wheels](https://github.com/YOUR_USERNAME/libint2-python-wheels/actions/workflows/build-wheels.yml/badge.svg)](https://github.com/YOUR_USERNAME/libint2-python-wheels/actions/workflows/build-wheels.yml)
+[![Build libint2 Python Wheels](https://github.com/TUstudents/libint2-python-wheels/actions/workflows/build-wheels.yml/badge.svg)](https://github.com/TUstudents/libint2-python-wheels/actions/workflows/build-wheels.yml)
 
 Pre-built Python wheels for [libint2](https://github.com/evaleev/libint) - a high-performance library for computing Gaussian integrals in quantum chemistry.
 
