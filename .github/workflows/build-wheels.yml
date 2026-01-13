@@ -52,13 +52,8 @@ jobs:
             VERSION="${{ inputs.libint_version }}"
             echo "Using specified version: $VERSION"
           else
-            # Fetch latest release that has a precompiled tarball
             echo "Fetching latest libint2 release..."
-            
-            # Get releases and find latest with .tgz asset
             RELEASES=$(curl -s "https://api.github.com/repos/evaleev/libint/releases?per_page=20")
-            
-            # Find the latest release that has a libint-X.Y.Z.tgz asset
             VERSION=$(echo "$RELEASES" | jq -r '
               .[] | 
               select(.assets[].name | test("^libint-[0-9]+\\.[0-9]+\\.[0-9]+\\.tgz$")) |
@@ -68,11 +63,9 @@ jobs:
               echo "ERROR: Could not find a release with precompiled tarball"
               exit 1
             fi
-            
             echo "Latest precompiled version: $VERSION"
           fi
           
-          # Verify the tarball exists
           URL="https://github.com/evaleev/libint/releases/download/v${VERSION}/libint-${VERSION}.tgz"
           HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$URL")
           
@@ -122,11 +115,11 @@ jobs:
       
       - name: Install system dependencies
         run: |
-          yum install -y cmake3 boost-devel eigen3-devel gmp-devel wget tar gzip jq
+          yum install -y cmake3 boost-devel eigen3-devel gmp-devel wget tar gzip
           ln -sf /usr/bin/cmake3 /usr/local/bin/cmake || true
-          
-          # Install Python development headers for the target Python version
-          # In manylinux, we need to ensure the Python has development files
+      
+      - name: Install Python build dependencies
+        run: |
           ${{ steps.python.outputs.PYTHON }} -m pip install --upgrade pip
           ${{ steps.python.outputs.PYTHON }} -m pip install build wheel scikit-build-core "pybind11>=3.0.0" numpy
       
@@ -138,80 +131,58 @@ jobs:
           tar xzf libint-${{ env.LIBINT_VERSION }}.tgz
           echo "Download complete"
       
-      - name: Configure and build libint2 with Python bindings
+      - name: Build and install libint2 C++ library
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          mkdir -p build && cd build
+          mkdir -p build-cpp && cd build-cpp
           
-          # Get Python paths
-          PY_INC=$(${{ steps.python.outputs.PYTHON }} -c "import sysconfig; print(sysconfig.get_path('include'))")
-          # In manylinux, LIBDIR might not point to where the .so/.a is for build purposes
-          # The libs are often in /opt/python/cp3X-cp3X/lib
-          PY_PREFIX=$(dirname $(dirname ${{ steps.python.outputs.PYTHON }}))
-          PY_LIB_DIR="${PY_PREFIX}/lib"
-          
-          # Find pybind11 cmake path
-          PYBIND11_DIR=$(${{ steps.python.outputs.PYTHON }} -c "import pybind11; print(pybind11.get_cmake_dir())")
-          
-          # Find the actual Python library file
-          PY_VER=$(${{ steps.python.outputs.PYTHON }} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-          PY_LIBNAME="libpython${PY_VER}.so"
-          
-          # In manylinux, the library might be in the lib directory
-          if [ -f "${PY_LIB_DIR}/${PY_LIBNAME}" ]; then
-            PY_LIBRARY="${PY_LIB_DIR}/${PY_LIBNAME}"
-          elif [ -f "${PY_LIB_DIR}/libpython${PY_VER}m.so" ]; then
-            PY_LIBRARY="${PY_LIB_DIR}/libpython${PY_VER}m.so"
-          else
-            # Try to find it
-            PY_LIBRARY=$(find ${PY_PREFIX} -name "libpython*.so" -o -name "libpython*.a" 2>/dev/null | head -1)
-          fi
-          
-          echo "Python Include: $PY_INC"
-          echo "Python Lib Dir: $PY_LIB_DIR"
-          echo "Python Library: $PY_LIBRARY"
-          echo "pybind11 Dir: $PYBIND11_DIR"
-          
-          # List what's in the lib directory
-          find ${PY_PREFIX} -name "libpython*" 2>/dev/null || true
-          
+          # Build C++ library only (no Python)
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
             -DBUILD_SHARED_LIBS=ON \
-            -DLIBINT2_PYTHON=ON \
-            -DPython_EXECUTABLE=${{ steps.python.outputs.PYTHON }} \
-            -DPython_ROOT_DIR=$PY_PREFIX \
-            -DPython_INCLUDE_DIR=$PY_INC \
-            -DPython_LIBRARY=$PY_LIBRARY \
-            -DPython_FIND_STRATEGY=LOCATION \
-            -Dpybind11_DIR=$PYBIND11_DIR
+            -DLIBINT2_PYTHON=OFF
           
-          cmake --build . --target libint2-python --parallel $(nproc)
+          cmake --build . --parallel $(nproc)
+          cmake --install .
+          
+          echo "=== Installed libint2 C++ library ==="
+          ls -la /tmp/libint2-install/lib/
       
-      - name: Build Python wheel
+      - name: Build Python wheel with scikit-build-core
         run: |
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}/build
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
+          # Patch pyproject.toml for version and numpy dependency
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
-            python/pyproject.toml \
+            pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
             --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
           
-          cd python
-          ${{ steps.python.outputs.PYTHON }} -m build --wheel
+          # Build wheel using scikit-build-core
+          # CMAKE_PREFIX_PATH tells CMake where to find installed libint2
+          CMAKE_PREFIX_PATH=/tmp/libint2-install \
+          CMAKE_ARGS="-DCMAKE_PREFIX_PATH=/tmp/libint2-install" \
+            ${{ steps.python.outputs.PYTHON }} -m build --wheel
+          
+          echo "=== Built wheel ==="
+          ls -la dist/
       
       - name: Add basis sets and repair wheel
         run: |
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/build/python/dist/*.whl \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
             --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
           mkdir -p /tmp/wheels
           auditwheel repair /tmp/wheel-with-basis/*.whl -w /tmp/wheels/
+          
+          echo "=== Final wheel ==="
+          ls -la /tmp/wheels/
       
       - name: Test wheel
         run: |
@@ -279,42 +250,40 @@ jobs:
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
           tar xzf libint.tgz
       
-      - name: Configure and build libint2 with Python bindings
+      - name: Build and install libint2 C++ library
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          mkdir -p build && cd build
-          
-          # Find pybind11 cmake path
-          PYBIND11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
+          mkdir -p build-cpp && cd build-cpp
           
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
             -DBUILD_SHARED_LIBS=ON \
-            -DLIBINT2_PYTHON=ON \
-            -DPython_EXECUTABLE=$(which python) \
-            -Dpybind11_DIR=$PYBIND11_DIR
+            -DLIBINT2_PYTHON=OFF
           
-          cmake --build . --target libint2-python --parallel $(sysctl -n hw.ncpu)
+          cmake --build . --parallel $(sysctl -n hw.ncpu)
+          cmake --install .
       
-      - name: Build Python wheel
+      - name: Build Python wheel with scikit-build-core
         run: |
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}/build
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
           python $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
-            python/pyproject.toml \
+            pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
             --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
           
-          cd python
-          python -m build --wheel
+          CMAKE_PREFIX_PATH=/tmp/libint2-install \
+          CMAKE_ARGS="-DCMAKE_PREFIX_PATH=/tmp/libint2-install" \
+            python -m build --wheel
       
       - name: Add basis sets and repair wheel
         run: |
           python $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/build/python/dist/*.whl \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
             --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
@@ -378,42 +347,40 @@ jobs:
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
           tar xzf libint.tgz
       
-      - name: Configure and build libint2 with Python bindings
+      - name: Build and install libint2 C++ library
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          mkdir -p build-arm64 && cd build-arm64
-          
-          # Find pybind11 cmake path
-          PYBIND11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
+          mkdir -p build-cpp && cd build-cpp
           
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
             -DBUILD_SHARED_LIBS=ON \
-            -DLIBINT2_PYTHON=ON \
-            -DPython_EXECUTABLE=$(which python) \
-            -Dpybind11_DIR=$PYBIND11_DIR
+            -DLIBINT2_PYTHON=OFF
           
-          cmake --build . --target libint2-python --parallel $(sysctl -n hw.ncpu)
+          cmake --build . --parallel $(sysctl -n hw.ncpu)
+          cmake --install .
       
-      - name: Build Python wheel
+      - name: Build Python wheel with scikit-build-core
         run: |
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}/build-arm64
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
           python $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
-            python/pyproject.toml \
+            pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
             --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
           
-          cd python
-          python -m build --wheel
+          CMAKE_PREFIX_PATH=/tmp/libint2-install \
+          CMAKE_ARGS="-DCMAKE_PREFIX_PATH=/tmp/libint2-install" \
+            python -m build --wheel
       
       - name: Add basis sets and repair wheel
         run: |
           python $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/build-arm64/python/dist/*.whl \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
             --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
@@ -477,8 +444,8 @@ jobs:
             ```
             
             ### Platforms
-            - Linux x86_64 (manylinux_2_34): Python 3.9-3.13
-            - macOS x86_64/ARM64: Python 3.10-3.13
+            - Linux x86_64 (manylinux_2_34): Python 3.9-3.14
+            - macOS x86_64/ARM64: Python 3.10-3.14
           files: wheels/*.whl
 
   # =============================================================================
