@@ -120,11 +120,6 @@ python:
   numpy_constraint: "<2.4"
 ```
 
-## License
-
-This repository (build scripts and workflows) is licensed under the MIT License.
-
-libint2 itself is licensed under the [LGPL-3.0](https://github.com/evaleev/libint/blob/master/LICENSE) license. The wheels contain libint2 code and are therefore subject to LGPL-3.0.
 
 ## Credits
 
