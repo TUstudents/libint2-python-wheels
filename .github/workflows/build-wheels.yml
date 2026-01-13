@@ -150,8 +150,12 @@ jobs:
           PY_PREFIX=$(dirname $(dirname ${{ steps.python.outputs.PYTHON }}))
           PY_LIB_DIR="${PY_PREFIX}/lib"
           
+          # Find pybind11 cmake path
+          PYBIND11_DIR=$(${{ steps.python.outputs.PYTHON }} -c "import pybind11; print(pybind11.get_cmake_dir())")
+          
           echo "Python Include: $PY_INC"
           echo "Python Lib Dir: $PY_LIB_DIR"
+          echo "pybind11 Dir: $PYBIND11_DIR"
           ls -la $PY_LIB_DIR
           
           cmake .. \
@@ -165,7 +169,8 @@ jobs:
             -DPython_ROOT_DIR=$PY_PREFIX \
             -DPython_INCLUDE_DIR=$PY_INC \
             -DPython_LIBRARY_DIRS=$PY_LIB_DIR \
-            -DPython_FIND_STRATEGY=LOCATION
+            -DPython_FIND_STRATEGY=LOCATION \
+            -Dpybind11_DIR=$PYBIND11_DIR
           
           cmake --build . --target libint2-python --parallel $(nproc)
       
@@ -262,6 +267,9 @@ jobs:
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
           mkdir -p build && cd build
           
+          # Find pybind11 cmake path
+          PYBIND11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
+          
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
@@ -269,7 +277,8 @@ jobs:
             -DENABLE_XHOST=OFF \
             -DBUILD_SHARED_LIBS=ON \
             -DLIBINT2_PYTHON=ON \
-            -DPython_EXECUTABLE=$(which python)
+            -DPython_EXECUTABLE=$(which python) \
+            -Dpybind11_DIR=$PYBIND11_DIR
           
           cmake --build . --target libint2-python --parallel $(sysctl -n hw.ncpu)
       
@@ -357,6 +366,9 @@ jobs:
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
           mkdir -p build-arm64 && cd build-arm64
           
+          # Find pybind11 cmake path
+          PYBIND11_DIR=$(python -c "import pybind11; print(pybind11.get_cmake_dir())")
+          
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
@@ -364,7 +376,8 @@ jobs:
             -DENABLE_XHOST=OFF \
             -DBUILD_SHARED_LIBS=ON \
             -DLIBINT2_PYTHON=ON \
-            -DPython_EXECUTABLE=$(which python)
+            -DPython_EXECUTABLE=$(which python) \
+            -Dpybind11_DIR=$PYBIND11_DIR
           
           cmake --build . --target libint2-python --parallel $(sysctl -n hw.ncpu)
       
