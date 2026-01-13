@@ -179,7 +179,8 @@ jobs:
             --output-dir /tmp/wheel-with-basis
           
           mkdir -p /tmp/wheels
-          auditwheel repair /tmp/wheel-with-basis/*.whl -w /tmp/wheels/
+          # Set LD_LIBRARY_PATH so auditwheel can find libint2 shared library
+          LD_LIBRARY_PATH=/tmp/libint2-install/lib auditwheel repair /tmp/wheel-with-basis/*.whl -w /tmp/wheels/
           
           echo "=== Final wheel ==="
           ls -la /tmp/wheels/
@@ -288,7 +289,8 @@ jobs:
             --output-dir /tmp/wheel-with-basis
           
           mkdir -p /tmp/wheels
-          delocate-wheel -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
+          # Use -L to tell delocate where to find libint2 shared library
+          delocate-wheel -L /tmp/libint2-install/lib -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
       
       - name: Test wheel
         run: |
@@ -385,7 +387,8 @@ jobs:
             --output-dir /tmp/wheel-with-basis
           
           mkdir -p /tmp/wheels
-          delocate-wheel -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
+          # Use -L to tell delocate where to find libint2 shared library
+          delocate-wheel -L /tmp/libint2-install/lib -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
       
       - name: Test wheel
         run: |
