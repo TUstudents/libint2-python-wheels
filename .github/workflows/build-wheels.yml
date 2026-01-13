@@ -302,8 +302,8 @@ jobs:
             --output-dir /tmp/wheel-with-basis
           
           mkdir -p /tmp/wheels
-          # Use -L to tell delocate where to find libint2 shared library
-          delocate-wheel -L /tmp/libint2-install/lib -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
+          # Set DYLD_LIBRARY_PATH so delocate can find libint2 shared library
+          DYLD_LIBRARY_PATH=/tmp/libint2-install/lib delocate-wheel -v -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
       
       - name: Test wheel
         run: |
@@ -404,8 +404,8 @@ jobs:
             --output-dir /tmp/wheel-with-basis
           
           mkdir -p /tmp/wheels
-          # Use -L to tell delocate where to find libint2 shared library
-          delocate-wheel -L /tmp/libint2-install/lib -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
+          # Set DYLD_LIBRARY_PATH so delocate can find libint2 shared library
+          DYLD_LIBRARY_PATH=/tmp/libint2-install/lib delocate-wheel -v -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
       
       - name: Test wheel
         run: |
