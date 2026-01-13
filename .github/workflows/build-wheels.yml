@@ -129,7 +129,11 @@ jobs:
           echo "Downloading libint2 v${{ env.LIBINT_VERSION }}..."
           wget -q "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz"
           tar xzf libint-${{ env.LIBINT_VERSION }}.tgz
-          echo "Download complete"
+          
+          # Patch CMakeLists.txt: Development -> Development.Module
+          # This avoids requiring libpython.so which doesn't exist in manylinux
+          sed -i 's/Development REQUIRED/Development.Module REQUIRED/' /tmp/libint-${{ env.LIBINT_VERSION }}/python/CMakeLists.txt
+          echo "Download and patch complete"
       
       - name: Build and install libint2 C++ library
         run: |
