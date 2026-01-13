@@ -20,20 +20,20 @@ Or install directly from URL (replace version and platform):
 
 ```bash
 # Example for Linux x86_64, Python 3.12
-pip install "libint2 @ https://github.com/TUstudents/libint2-python-wheels/releases/download/v<version>/libint2-<version>-cp312-cp312-manylinux_2_28_x86_64.whl"
+pip install "libint2 @ https://github.com/TUstudents/libint2-python-wheels/releases/download/v<version>/libint2-<version>-cp312-cp312-manylinux_2_34_x86_64.whl"
 ```
 
 ### With uv
 
 ```bash
-uv add "libint2 @ https://github.com/TUstudents/libint2-python-wheels/releases/download/v<version>/libint2-<version>-cp312-cp312-manylinux_2_28_x86_64.whl"
+uv add "libint2 @ https://github.com/TUstudents/libint2-python-wheels/releases/download/v<version>/libint2-<version>-cp312-cp312-manylinux_2_34_x86_64.whl"
 ```
 
 ## Supported Platforms
 
 | Platform | Architecture | Python Versions |
 |----------|--------------|-----------------|
-| Linux (manylinux_2_28) | x86_64 | 3.9, 3.10, 3.11, 3.12, 3.13, 3.14 |
+| Linux (manylinux_2_34) | x86_64 | 3.9, 3.10, 3.11, 3.12, 3.13, 3.14 |
 | macOS 15 | x86_64 (Intel) | 3.10, 3.11, 3.12, 3.13, 3.14 |
 | macOS 15 | ARM64 (Apple Silicon) | 3.10, 3.11, 3.12, 3.13, 3.14 |
 
