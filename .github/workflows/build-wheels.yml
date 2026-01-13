@@ -68,26 +68,13 @@ jobs:
       
       - name: Install system dependencies
         run: |
-          yum install -y \
-            cmake3 \
-            boost-devel \
-            eigen3-devel \
-            gmp-devel \
-            wget \
-            tar \
-            gzip
-          
+          yum install -y cmake3 boost-devel eigen3-devel gmp-devel wget tar gzip
           ln -sf /usr/bin/cmake3 /usr/local/bin/cmake || true
       
       - name: Install Python build dependencies
         run: |
           ${{ steps.python.outputs.PYTHON }} -m pip install --upgrade pip
-          ${{ steps.python.outputs.PYTHON }} -m pip install \
-            build \
-            wheel \
-            scikit-build-core \
-            "pybind11>=3.0.0" \
-            numpy
+          ${{ steps.python.outputs.PYTHON }} -m pip install build wheel scikit-build-core "pybind11>=3.0.0" numpy
       
       - name: Cache libint2 source
         uses: actions/cache@v4
@@ -106,9 +93,7 @@ jobs:
       - name: Build libint2 C++ library
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          
           mkdir -p build && cd build
-          
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
@@ -116,77 +101,53 @@ jobs:
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
             -DBUILD_SHARED_LIBS=ON
-          
           cmake --build . --parallel $(nproc)
           cmake --install .
-          
-          echo "=== Installed libint2 C++ library ==="
-          ls -la /tmp/libint2-install/lib/
       
-      - name: Build Python wheel
+      - name: Patch pyproject.toml and build wheel
         run: |
+          # Patch pyproject.toml
+          ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/pyproject.toml \
+            --version "${{ env.LIBINT_VERSION }}" \
+            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
+          
+          # Build wheel
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
-          
-          # Set up environment so CMake can find the installed libint2
-          export CMAKE_PREFIX_PATH="/tmp/libint2-install:${CMAKE_PREFIX_PATH}"
+          export CMAKE_PREFIX_PATH="/tmp/libint2-install"
           export Libint2_DIR="/tmp/libint2-install/lib/cmake/libint2"
-          
-          # Build the wheel
           ${{ steps.python.outputs.PYTHON }} -m build --wheel \
             --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
             --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
-          
-          echo "=== Built wheel ==="
-          ls -la dist/
       
-      - name: Add basis sets to wheel
+      - name: Add basis sets and repair wheel
         run: |
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          
+          # Add basis sets
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            python/dist/*.whl \
-            --basis-dir lib/basis \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
+            --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
-          echo "=== Wheel with basis sets ==="
-          ls -la /tmp/wheel-with-basis/
-      
-      - name: Repair wheel for manylinux
-        run: |
+          # Repair for manylinux
           mkdir -p /tmp/wheels
           auditwheel repair /tmp/wheel-with-basis/*.whl -w /tmp/wheels/
-          
-          echo "=== Final wheel ==="
-          ls -la /tmp/wheels/
       
       - name: Test wheel
         run: |
-          # Install the wheel
           ${{ steps.python.outputs.PYTHON }} -m pip install /tmp/wheels/*.whl
-          
-          # Test import and basic functionality
           ${{ steps.python.outputs.PYTHON }} -c "
           import libint2
-          print(f'libint2 imported successfully')
-          print(f'MAX_AM = {libint2.MAX_AM}')
-          
-          # Test creating objects
+          print(f'libint2 MAX_AM={libint2.MAX_AM}')
           atom = libint2.Atom(1, [0.0, 0.0, 0.0])
-          print('Created Atom')
-          
           shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-          print(f'Created Shell with {shell.size()} basis functions')
-          
-          # Test basis set loading
+          print(f'Shell size={shell.size()}')
           atoms = [libint2.Atom(1, [0.0, 0.0, 0.0]), libint2.Atom(1, [0.0, 0.0, 1.4])]
           try:
               basis = libint2.BasisSet('sto-3g', atoms)
-              print(f'Created BasisSet with {basis.nbf} basis functions')
+              print(f'BasisSet nbf={basis.nbf}')
           except Exception as e:
-              print(f'BasisSet test skipped: {e}')
-          
-          print('All tests passed!')
+              print(f'BasisSet: {e}')
+          print('OK')
           "
       
       - name: Upload wheel artifact
@@ -216,20 +177,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
           brew install cmake boost eigen gmp
-      
-      - name: Install Python build dependencies
-        run: |
           python -m pip install --upgrade pip
-          python -m pip install \
-            build \
-            wheel \
-            scikit-build-core \
-            "pybind11>=3.0.0" \
-            numpy \
-            delocate
+          python -m pip install build wheel scikit-build-core "pybind11>=3.0.0" numpy delocate
       
       - name: Cache libint2 source
         uses: actions/cache@v4
@@ -248,9 +200,7 @@ jobs:
       - name: Build libint2 C++ library
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          
           mkdir -p build && cd build
-          
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
@@ -258,68 +208,47 @@ jobs:
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
             -DBUILD_SHARED_LIBS=ON
-          
           cmake --build . --parallel $(sysctl -n hw.ncpu)
           cmake --install .
-          
-          echo "=== Installed libint2 C++ library ==="
-          ls -la /tmp/libint2-install/lib/
       
-      - name: Build Python wheel
+      - name: Patch pyproject.toml and build wheel
         run: |
+          python $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/pyproject.toml \
+            --version "${{ env.LIBINT_VERSION }}" \
+            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
+          
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
-          
-          export CMAKE_PREFIX_PATH="/tmp/libint2-install:${CMAKE_PREFIX_PATH}"
-          export Libint2_DIR="/tmp/libint2-install/lib/cmake/libint2"
-          
+          export CMAKE_PREFIX_PATH="/tmp/libint2-install"
           python -m build --wheel \
             --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
             --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
-          
-          echo "=== Built wheel ==="
-          ls -la dist/
       
-      - name: Add basis sets to wheel
+      - name: Add basis sets and repair wheel
         run: |
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          
           python $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            python/dist/*.whl \
-            --basis-dir lib/basis \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
+            --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
-          echo "=== Wheel with basis sets ==="
-          ls -la /tmp/wheel-with-basis/
-      
-      - name: Repair wheel for macOS
-        run: |
           mkdir -p /tmp/wheels
           delocate-wheel -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
-          
-          echo "=== Final wheel ==="
-          ls -la /tmp/wheels/
       
       - name: Test wheel
         run: |
           python -m pip install /tmp/wheels/*.whl
           python -c "
           import libint2
-          print(f'libint2 imported successfully')
-          print(f'MAX_AM = {libint2.MAX_AM}')
-          
-          atom = libint2.Atom(1, [0.0, 0.0, 0.0])
+          print(f'libint2 MAX_AM={libint2.MAX_AM}')
           shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-          print(f'Created Shell with {shell.size()} basis functions')
-          
+          print(f'Shell size={shell.size()}')
           atoms = [libint2.Atom(1, [0.0, 0.0, 0.0]), libint2.Atom(1, [0.0, 0.0, 1.4])]
           try:
               basis = libint2.BasisSet('sto-3g', atoms)
-              print(f'Created BasisSet with {basis.nbf} basis functions')
+              print(f'BasisSet nbf={basis.nbf}')
           except Exception as e:
-              print(f'BasisSet test skipped: {e}')
-          
-          print('All tests passed!')
+              print(f'BasisSet: {e}')
+          print('OK')
           "
       
       - name: Upload wheel artifact
@@ -349,20 +278,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
           brew install cmake boost eigen gmp
-      
-      - name: Install Python build dependencies
-        run: |
           python -m pip install --upgrade pip
-          python -m pip install \
-            build \
-            wheel \
-            scikit-build-core \
-            "pybind11>=3.0.0" \
-            numpy \
-            delocate
+          python -m pip install build wheel scikit-build-core "pybind11>=3.0.0" numpy delocate
       
       - name: Cache libint2 source
         uses: actions/cache@v4
@@ -381,9 +301,7 @@ jobs:
       - name: Build libint2 C++ library
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          
-          mkdir -p build && cd build
-          
+          mkdir -p build-arm64 && cd build-arm64
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
@@ -391,68 +309,47 @@ jobs:
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
             -DBUILD_SHARED_LIBS=ON
-          
           cmake --build . --parallel $(sysctl -n hw.ncpu)
           cmake --install .
-          
-          echo "=== Installed libint2 C++ library ==="
-          ls -la /tmp/libint2-install/lib/
       
-      - name: Build Python wheel
+      - name: Patch pyproject.toml and build wheel
         run: |
+          python $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/pyproject.toml \
+            --version "${{ env.LIBINT_VERSION }}" \
+            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
+          
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
-          
-          export CMAKE_PREFIX_PATH="/tmp/libint2-install:${CMAKE_PREFIX_PATH}"
-          export Libint2_DIR="/tmp/libint2-install/lib/cmake/libint2"
-          
+          export CMAKE_PREFIX_PATH="/tmp/libint2-install"
           python -m build --wheel \
             --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
             --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
-          
-          echo "=== Built wheel ==="
-          ls -la dist/
       
-      - name: Add basis sets to wheel
+      - name: Add basis sets and repair wheel
         run: |
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}
-          
           python $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            python/dist/*.whl \
-            --basis-dir lib/basis \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
+            --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
-          echo "=== Wheel with basis sets ==="
-          ls -la /tmp/wheel-with-basis/
-      
-      - name: Repair wheel for macOS
-        run: |
           mkdir -p /tmp/wheels
           delocate-wheel -w /tmp/wheels/ /tmp/wheel-with-basis/*.whl
-          
-          echo "=== Final wheel ==="
-          ls -la /tmp/wheels/
       
       - name: Test wheel
         run: |
           python -m pip install /tmp/wheels/*.whl
           python -c "
           import libint2
-          print(f'libint2 imported successfully')
-          print(f'MAX_AM = {libint2.MAX_AM}')
-          
-          atom = libint2.Atom(1, [0.0, 0.0, 0.0])
+          print(f'libint2 MAX_AM={libint2.MAX_AM}')
           shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-          print(f'Created Shell with {shell.size()} basis functions')
-          
+          print(f'Shell size={shell.size()}')
           atoms = [libint2.Atom(1, [0.0, 0.0, 0.0]), libint2.Atom(1, [0.0, 0.0, 1.4])]
           try:
               basis = libint2.BasisSet('sto-3g', atoms)
-              print(f'Created BasisSet with {basis.nbf} basis functions')
+              print(f'BasisSet nbf={basis.nbf}')
           except Exception as e:
-              print(f'BasisSet test skipped: {e}')
-          
-          print('All tests passed!')
+              print(f'BasisSet: {e}')
+          print('OK')
           "
       
       - name: Upload wheel artifact
@@ -470,7 +367,6 @@ jobs:
     needs: [build-linux, build-macos-x86, build-macos-arm64]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    
     permissions:
       contents: write
     
@@ -482,9 +378,6 @@ jobs:
           path: wheels/
           merge-multiple: true
       
-      - name: List wheels
-        run: ls -la wheels/
-      
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -492,35 +385,17 @@ jobs:
           body: |
             ## libint2 Python Wheels v${{ env.LIBINT_VERSION }}
             
-            Pre-built Python wheels for libint2 ${{ env.LIBINT_VERSION }}.
-            
-            **Includes bundled basis sets** (sto-3g, cc-pvdz, etc.)
+            Pre-built Python wheels with bundled basis sets.
             
             ### Installation
-            
             ```bash
-            pip install libint2-${{ env.LIBINT_VERSION }}-<platform>.whl
+            pip install "libint2 @ https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/<wheel>.whl"
             ```
             
-            Or install directly from URL:
-            
-            ```bash
-            pip install "libint2 @ https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/<wheel-filename>.whl"
-            ```
-            
-            ### Supported Platforms
-            
-            - Linux x86_64 (manylinux_2_28)
-            - macOS x86_64 (Intel)
-            - macOS ARM64 (Apple Silicon)
-            
-            ### Python Versions
-            
-            - Linux: 3.9, 3.10, 3.11, 3.12, 3.13
-            - macOS: 3.10, 3.11, 3.12, 3.13
+            ### Platforms
+            - Linux x86_64 (manylinux_2_28): Python 3.9-3.13
+            - macOS x86_64/ARM64: Python 3.10-3.13
           files: wheels/*.whl
-          draft: false
-          prerelease: false
 
   # =============================================================================
   # Publish to PyPI (optional)
@@ -530,11 +405,9 @@ jobs:
     needs: [build-linux, build-macos-x86, build-macos-arm64]
     runs-on: ubuntu-latest
     if: inputs.publish_pypi == true
-    
     environment:
       name: pypi
       url: https://pypi.org/p/libint2
-    
     permissions:
       id-token: write
     
@@ -548,22 +421,15 @@ jobs:
       
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
 
-  # =============================================================================
-  # Publish to Test PyPI (optional)
-  # =============================================================================
   publish-test-pypi:
     name: Publish to Test PyPI
     needs: [build-linux, build-macos-x86, build-macos-arm64]
     runs-on: ubuntu-latest
     if: inputs.publish_test_pypi == true
-    
     environment:
       name: testpypi
       url: https://test.pypi.org/p/libint2
-    
     permissions:
       id-token: write
     
@@ -579,4 +445,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          packages-dir: dist/
