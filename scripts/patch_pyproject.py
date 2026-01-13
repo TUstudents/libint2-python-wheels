@@ -3,6 +3,7 @@
 Patch libint2's pyproject.toml template to:
 1. Replace @LIBINT_VERSION@ placeholder
 2. Add numpy dependency with constraint
+3. Remove or fix readme reference
 """
 
 import argparse
@@ -18,6 +19,13 @@ def patch_pyproject(input_path: Path, output_path: Path, version: str, numpy_con
     
     # Replace version placeholder
     content = content.replace("@LIBINT_VERSION@", version)
+    
+    # Remove readme line if the file doesn't exist
+    readme_path = input_path.parent / "README.md"
+    if not readme_path.exists():
+        # Remove the readme line entirely
+        content = re.sub(r'^readme\s*=\s*"[^"]*"\s*\n', '', content, flags=re.MULTILINE)
+        print("  Removed readme reference (file not found)")
     
     # Add numpy dependency if not present
     if "numpy" not in content:
