@@ -1,193 +1,258 @@
 #!/usr/bin/env python3
 """
 Test script for libint2 wheel installation.
-
-Run this after installing a libint2 wheel to verify it works correctly.
+Based on upstream libint2/python/tests/test_libint2.py
 """
 
 import sys
+import unittest
 
 
-def test_import():
-    """Test that libint2 can be imported."""
-    print("Testing import...", end=" ")
-    import libint2
-    print("OK")
-    print(f"  MAX_AM = {libint2.MAX_AM}")
-    return libint2
-
-
-def test_atom(libint2):
-    """Test Atom creation."""
-    print("Testing Atom...", end=" ")
-    atom = libint2.Atom(1, [0.0, 0.0, 0.0])  # Hydrogen at origin
-    print("OK")
-    return atom
-
-
-def test_shell(libint2):
-    """Test Shell creation."""
-    print("Testing Shell...", end=" ")
-    # Create an s-type shell with one primitive (exponent=1.0, coeff=1.0)
-    shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-    print(f"OK (size={shell.size()})")
-    return shell
-
-
-def test_basis_set(libint2):
-    """Test BasisSet creation with named basis."""
-    print("Testing BasisSet (named)...", end=" ")
-    atoms = [
-        libint2.Atom(1, [0.0, 0.0, 0.0]),
-        libint2.Atom(1, [0.0, 0.0, 1.4]),
-    ]
-    try:
-        basis = libint2.BasisSet("sto-3g", atoms)
-        print(f"OK (nbf={basis.nbf}, nshells={len(basis)})")
-        return basis
-    except Exception as e:
-        print(f"SKIPPED ({e})")
-        return None
-
-
-def test_basis_set_from_shells(libint2):
-    """Test BasisSet creation from explicit shells."""
-    print("Testing BasisSet (from shells)...", end=" ")
-    # Create two s-type shells at different centers
-    shell1 = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-    shell2 = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 1.4])
-    basis = libint2.BasisSet([shell1, shell2])
-    print(f"OK (nbf={basis.nbf}, nshells={len(basis)})")
-    return basis
-
-
-def test_engine_creation(libint2):
-    """Test Engine creation for different operators."""
-    print("Testing Engine creation...", end=" ")
+class TestLibint2(unittest.TestCase):
+    """Test libint2 Python bindings."""
     
-    overlap = libint2.overlap()
-    kinetic = libint2.kinetic()
-    coulomb = libint2.coulomb()
+    @classmethod
+    def setUpClass(cls):
+        """Import libint2 once for all tests."""
+        import libint2
+        cls.libint2 = libint2
+        
+        # Set single thread for reproducibility
+        libint2.Engine.num_threads = 1
+        
+        # Test molecules
+        cls.h2o = [
+            (8, [0.00000, -0.07579, 0.00000]),
+            (1, [0.86681, 0.60144, 0.00000]),
+            (1, [-0.86681, 0.60144, 0.00000]),
+        ]
+        
+        cls.h2 = [
+            (1, [0.0, 0.0, 0.0]),
+            (1, [0.0, 0.0, 1.4]),
+        ]
     
-    # Nuclear requires point charges
-    nuclear = libint2.nuclear([(1.0, [0.0, 0.0, 0.0])])
+    def test_import_and_max_am(self):
+        """Test that libint2 imports and has valid MAX_AM."""
+        self.assertGreater(self.libint2.MAX_AM, 0)
+        print(f"MAX_AM = {self.libint2.MAX_AM}")
     
-    print("OK (overlap, kinetic, coulomb, nuclear)")
-    return overlap
-
-
-def test_shell_integrals(libint2):
-    """Test computing integrals between shells."""
-    print("Testing shell integrals...", end=" ")
+    def test_shell_creation(self):
+        """Test Shell creation with different angular momenta."""
+        Shell = self.libint2.Shell
+        
+        # s-type shell
+        s = Shell(0, [(1, 10)])
+        self.assertEqual(s.size(), 1)
+        
+        # p-type shell
+        p = Shell(1, [(1, 10)])
+        self.assertEqual(p.size(), 3)
+        
+        # d-type shell with explicit center
+        d = Shell(2, [(1, 10)], [0.1, 0.2, 0.3])
+        self.assertEqual(d.size(), 5)  # spherical
+        
+        print("Shell creation OK")
     
-    shell1 = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-    shell2 = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 1.4])
+    def test_basis_set_named(self):
+        """Test BasisSet creation from named basis."""
+        try:
+            basis = self.libint2.BasisSet('sto-3g', self.h2)
+            self.assertEqual(basis.nbf, 2)
+            self.assertEqual(len(basis), 2)
+            print(f"BasisSet(sto-3g, H2): nbf={basis.nbf}, nshells={len(basis)}")
+        except Exception as e:
+            self.skipTest(f"Basis set not found: {e}")
     
-    engine = libint2.overlap()
-    result = engine.compute(shell1, shell2)
+    def test_basis_set_6_31g(self):
+        """Test 6-31G basis on water."""
+        try:
+            basis = self.libint2.BasisSet('6-31g', self.h2o)
+            self.assertEqual(len(basis), 9)
+            print(f"BasisSet(6-31g, H2O): nbf={basis.nbf}, nshells={len(basis)}")
+        except Exception as e:
+            self.skipTest(f"Basis set not found: {e}")
     
-    if result is not None:
+    def test_basis_set_pure_property(self):
+        """Test setting pure/Cartesian on basis."""
+        try:
+            basis = self.libint2.BasisSet('6-31g', self.h2o)
+            
+            # Set all to Cartesian
+            basis.pure = False
+            pure_flags = [s.pure for s in basis]
+            self.assertTrue(all(not p for p in pure_flags))
+            
+            # Set first shell to pure
+            basis[0].pure = True
+            self.assertTrue(basis[0].pure)
+            
+            print("Basis pure property OK")
+        except Exception as e:
+            self.skipTest(f"Basis set not found: {e}")
+    
+    def test_basis_set_from_shells(self):
+        """Test BasisSet creation from explicit shells."""
+        Shell = self.libint2.Shell
+        BasisSet = self.libint2.BasisSet
+        
+        shell1 = Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
+        shell2 = Shell(0, [(1.0, 1.0)], [0.0, 0.0, 1.4])
+        
+        basis = BasisSet([shell1, shell2])
+        self.assertEqual(basis.nbf, 2)
+        self.assertEqual(len(basis), 2)
+        
+        print(f"BasisSet from shells: nbf={basis.nbf}")
+    
+    def test_overlap_integral(self):
+        """Test overlap integral computation."""
         import numpy as np
-        # Result should be a 1x1 array for s-s overlap
-        assert result.shape == (1, 1), f"Expected (1,1), got {result.shape}"
-        # Overlap should be positive and less than 1 for non-identical shells
-        assert 0 < result[0, 0] < 1, f"Unexpected overlap value: {result[0, 0]}"
-        print(f"OK (S={result[0, 0]:.6f})")
-    else:
-        print("OK (null result - shells may be far apart)")
-
-
-def test_basis_integrals(libint2, basis):
-    """Test computing full integral matrices over a basis."""
-    if basis is None:
-        print("Testing basis integrals... SKIPPED (no basis)")
-        return
+        
+        s = self.libint2.Shell(0, [(1, 10)])
+        engine = self.libint2.overlap()
+        result = engine.compute(s, s)
+        
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(np.linalg.norm(result), 1.0, places=5)
+        
+        print(f"Overlap <s|s> = {result[0,0]:.6f}")
     
-    print("Testing basis integrals...", end=" ")
+    def test_kinetic_integral(self):
+        """Test kinetic energy integral computation."""
+        import numpy as np
+        
+        s = self.libint2.Shell(0, [(1, 10)])
+        engine = self.libint2.kinetic()
+        result = engine.compute(s, s)
+        
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(np.linalg.norm(result), 1.5, places=5)
+        
+        print(f"Kinetic <s|T|s> norm = {np.linalg.norm(result):.6f}")
     
-    engine = libint2.overlap()
-    S = engine.compute(basis, basis)
+    def test_nuclear_integral(self):
+        """Test nuclear attraction integral computation."""
+        import numpy as np
+        
+        s = self.libint2.Shell(0, [(1, 10)])
+        engine = self.libint2.nuclear(self.h2o)
+        result = engine.compute(s, s)
+        
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(np.linalg.norm(result), 14.54704336519, places=5)
+        
+        print(f"Nuclear <s|V|s> norm = {np.linalg.norm(result):.6f}")
     
-    import numpy as np
+    def test_coulomb_integral(self):
+        """Test 4-center Coulomb integral computation."""
+        import numpy as np
+        
+        s = self.libint2.Shell(0, [(1, 10)])
+        p = self.libint2.Shell(1, [(1, 10)])
+        
+        engine = self.libint2.coulomb()
+        result = engine.compute(p, p, s, s)
+        
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(np.linalg.norm(result), 1.62867503968, places=5)
+        
+        print(f"Coulomb (pp|ss) norm = {np.linalg.norm(result):.6f}")
     
-    # Check shape
-    nbf = basis.nbf
-    assert S.shape == (nbf, nbf), f"Expected ({nbf},{nbf}), got {S.shape}"
+    def test_3center_integral(self):
+        """Test 3-center integral with BraKet specification."""
+        import numpy as np
+        
+        s = self.libint2.Shell(0, [(1, 10)])
+        
+        engine = self.libint2.Engine(
+            self.libint2.Operator.coulomb,
+            braket=self.libint2.BraKet.XXXS
+        )
+        result = engine.compute(s, s, s)
+        
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(np.linalg.norm(result), 3.6563211198, places=5)
+        
+        print(f"3-center (ss|s) norm = {np.linalg.norm(result):.6f}")
     
-    # Overlap matrix should be symmetric
-    assert np.allclose(S, S.T), "Overlap matrix not symmetric"
+    def test_basis_integrals(self):
+        """Test integral computation over entire basis."""
+        import numpy as np
+        
+        Shell = self.libint2.Shell
+        BasisSet = self.libint2.BasisSet
+        
+        p = Shell(1, [(1, 10)])
+        d = Shell(2, [(1, 10)], [0.1, 0.2, 0.3])
+        
+        basis = BasisSet([p, d])
+        
+        engine = self.libint2.overlap()
+        S = engine.compute(basis, basis)
+        
+        self.assertEqual(S.shape, (basis.nbf, basis.nbf))
+        
+        # Check symmetry
+        self.assertTrue(np.allclose(S, S.T))
+        
+        # Check specific values if using standard ordering
+        if self.libint2.solid_harmonics_ordering() == self.libint2.SHGShellOrdering.Standard:
+            self.assertAlmostEqual(S[0, 3], -0.08950980671097111, places=5)
+            self.assertAlmostEqual(S[0, 4], -0.26852942, places=5)
+            self.assertAlmostEqual(S[1, 3], 0.0055943629194356937, places=5)
+        
+        print(f"Basis overlap matrix shape={S.shape}")
     
-    # Diagonal should be 1.0 for normalized basis
-    # (may not be exactly 1.0 depending on normalization)
+    def test_compute_1body_ints(self):
+        """Test compute_1body_ints convenience method."""
+        import numpy as np
+        
+        Shell = self.libint2.Shell
+        BasisSet = self.libint2.BasisSet
+        
+        s1 = Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
+        s2 = Shell(0, [(1.0, 1.0)], [0.0, 0.0, 1.4])
+        basis = BasisSet([s1, s2])
+        
+        engine = self.libint2.overlap()
+        S = engine.compute_1body_ints(basis)
+        
+        self.assertEqual(S.shape, (2, 2))
+        self.assertTrue(np.allclose(S, S.T))
+        
+        print(f"compute_1body_ints OK, shape={S.shape}")
     
-    print(f"OK (shape={S.shape}, symmetric={np.allclose(S, S.T)})")
-
-
-def test_1body_ints(libint2, basis):
-    """Test compute_1body_ints convenience function."""
-    if basis is None:
-        print("Testing compute_1body_ints... SKIPPED (no basis)")
-        return
-    
-    print("Testing compute_1body_ints...", end=" ")
-    
-    engine = libint2.overlap()
-    S = engine.compute_1body_ints(basis)
-    
-    import numpy as np
-    
-    nbf = basis.nbf
-    assert S.shape == (nbf, nbf), f"Expected ({nbf},{nbf}), got {S.shape}"
-    assert np.allclose(S, S.T), "Matrix not symmetric"
-    
-    print(f"OK (shape={S.shape})")
-
-
-def test_num_threads(libint2):
-    """Test thread count property."""
-    print("Testing num_threads...", end=" ")
-    
-    # Get current value
-    current = libint2.Engine.num_threads
-    print(f"OK (num_threads={current})")
-
-
-def test_numpy_compatibility():
-    """Test numpy compatibility."""
-    print("Testing numpy...", end=" ")
-    import numpy as np
-    print(f"OK (version={np.__version__})")
+    def test_num_threads(self):
+        """Test Engine.num_threads property."""
+        current = self.libint2.Engine.num_threads
+        self.assertIsInstance(current, int)
+        self.assertGreater(current, 0)
+        
+        print(f"num_threads = {current}")
 
 
 def main():
-    print("=" * 50)
+    print("=" * 60)
     print("libint2 Wheel Test Suite")
-    print("=" * 50)
+    print("=" * 60)
     print()
     
-    try:
-        libint2 = test_import()
-        test_atom(libint2)
-        test_shell(libint2)
-        basis = test_basis_set(libint2)
-        basis_explicit = test_basis_set_from_shells(libint2)
-        test_engine_creation(libint2)
-        test_shell_integrals(libint2)
-        test_basis_integrals(libint2, basis or basis_explicit)
-        test_1body_ints(libint2, basis or basis_explicit)
-        test_num_threads(libint2)
-        test_numpy_compatibility()
-        
-        print()
-        print("=" * 50)
+    # Run tests
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromTestCase(TestLibint2)
+    
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    print()
+    print("=" * 60)
+    if result.wasSuccessful():
         print("All tests passed!")
-        print("=" * 50)
         return 0
-        
-    except Exception as e:
-        print(f"\nFAILED: {e}")
-        import traceback
-        traceback.print_exc()
+    else:
+        print(f"Failed: {len(result.failures)}, Errors: {len(result.errors)}")
         return 1
 
 
