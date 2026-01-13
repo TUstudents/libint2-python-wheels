@@ -64,7 +64,6 @@ jobs:
             3.13) PYTHON_PATH="/opt/python/cp313-cp313/bin/python" ;;
           esac
           echo "PYTHON=${PYTHON_PATH}" >> $GITHUB_OUTPUT
-          # Add Python bin directory to PATH for cmake to find
           echo "$(dirname ${PYTHON_PATH})" >> $GITHUB_PATH
       
       - name: Install system dependencies
@@ -104,14 +103,39 @@ jobs:
           wget -q "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz"
           tar xzf libint-${{ env.LIBINT_VERSION }}.tgz
       
-      - name: Build wheel using scikit-build-core
+      - name: Build libint2 C++ library
+        run: |
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}
+          
+          mkdir -p build && cd build
+          
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DENABLE_FORTRAN=OFF \
+            -DENABLE_XHOST=OFF \
+            -DBUILD_SHARED_LIBS=ON
+          
+          cmake --build . --parallel $(nproc)
+          cmake --install .
+          
+          echo "=== Installed libint2 C++ library ==="
+          ls -la /tmp/libint2-install/lib/
+      
+      - name: Build Python wheel
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
+          
+          # Set up environment so CMake can find the installed libint2
+          export CMAKE_PREFIX_PATH="/tmp/libint2-install:${CMAKE_PREFIX_PATH}"
+          export Libint2_DIR="/tmp/libint2-install/lib/cmake/libint2"
           
           # Build the wheel
           ${{ steps.python.outputs.PYTHON }} -m build --wheel \
             --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }}
+            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
+            --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
           
           echo "=== Built wheel ==="
           ls -la dist/
@@ -120,7 +144,6 @@ jobs:
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
           
-          # Add basis files to the wheel
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
             python/dist/*.whl \
             --basis-dir lib/basis \
@@ -155,7 +178,7 @@ jobs:
           shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
           print(f'Created Shell with {shell.size()} basis functions')
           
-          # Test basis set loading (requires basis files)
+          # Test basis set loading
           atoms = [libint2.Atom(1, [0.0, 0.0, 0.0]), libint2.Atom(1, [0.0, 0.0, 1.4])]
           try:
               basis = libint2.BasisSet('sto-3g', atoms)
@@ -222,13 +245,37 @@ jobs:
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
           tar xzf libint.tgz
       
-      - name: Build wheel using scikit-build-core
+      - name: Build libint2 C++ library
+        run: |
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}
+          
+          mkdir -p build && cd build
+          
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DENABLE_FORTRAN=OFF \
+            -DENABLE_XHOST=OFF \
+            -DBUILD_SHARED_LIBS=ON
+          
+          cmake --build . --parallel $(sysctl -n hw.ncpu)
+          cmake --install .
+          
+          echo "=== Installed libint2 C++ library ==="
+          ls -la /tmp/libint2-install/lib/
+      
+      - name: Build Python wheel
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
+          export CMAKE_PREFIX_PATH="/tmp/libint2-install:${CMAKE_PREFIX_PATH}"
+          export Libint2_DIR="/tmp/libint2-install/lib/cmake/libint2"
+          
           python -m build --wheel \
             --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }}
+            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
+            --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
           
           echo "=== Built wheel ==="
           ls -la dist/
@@ -331,13 +378,37 @@ jobs:
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
           tar xzf libint.tgz
       
-      - name: Build wheel using scikit-build-core
+      - name: Build libint2 C++ library
+        run: |
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}
+          
+          mkdir -p build && cd build
+          
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DENABLE_FORTRAN=OFF \
+            -DENABLE_XHOST=OFF \
+            -DBUILD_SHARED_LIBS=ON
+          
+          cmake --build . --parallel $(sysctl -n hw.ncpu)
+          cmake --install .
+          
+          echo "=== Installed libint2 C++ library ==="
+          ls -la /tmp/libint2-install/lib/
+      
+      - name: Build Python wheel
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
+          export CMAKE_PREFIX_PATH="/tmp/libint2-install:${CMAKE_PREFIX_PATH}"
+          export Libint2_DIR="/tmp/libint2-install/lib/cmake/libint2"
+          
           python -m build --wheel \
             --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }}
+            --config-setting=cmake.define.LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
+            --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
           
           echo "=== Built wheel ==="
           ls -la dist/
