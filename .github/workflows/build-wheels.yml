@@ -90,47 +90,58 @@ jobs:
           wget -q "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz"
           tar xzf libint-${{ env.LIBINT_VERSION }}.tgz
       
-      - name: Build libint2 C++ library
+      - name: Configure and build libint2 with Python bindings
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
           mkdir -p build && cd build
+          
+          # Configure with Python bindings enabled
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
-            -DBUILD_SHARED_LIBS=ON
-          cmake --build . --parallel $(nproc)
-          cmake --install .
+            -DBUILD_SHARED_LIBS=ON \
+            -DLIBINT2_PYTHON=ON \
+            -DPython_EXECUTABLE=${{ steps.python.outputs.PYTHON }}
+          
+          # Build the Python module
+          cmake --build . --target libint2-python --parallel $(nproc)
+          
+          echo "=== Build complete ==="
+          ls -la python/ || true
       
-      - name: Patch pyproject.toml and build wheel
+      - name: Build Python wheel
         run: |
-          # Patch pyproject.toml
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}/build
+          
+          # Patch pyproject.toml to add numpy dependency
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/python/pyproject.toml \
+            python/pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
             --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
           
-          # Build wheel
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
-          export CMAKE_PREFIX_PATH="/tmp/libint2-install"
-          export Libint2_DIR="/tmp/libint2-install/lib/cmake/libint2"
-          ${{ steps.python.outputs.PYTHON }} -m build --wheel \
-            --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
+          # Build the wheel using the configured pyproject.toml
+          cd python
+          ${{ steps.python.outputs.PYTHON }} -m build --wheel
+          
+          echo "=== Built wheel ==="
+          ls -la dist/
       
       - name: Add basis sets and repair wheel
         run: |
           # Add basis sets
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/build/python/dist/*.whl \
             --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
           # Repair for manylinux
           mkdir -p /tmp/wheels
           auditwheel repair /tmp/wheel-with-basis/*.whl -w /tmp/wheels/
+          
+          echo "=== Final wheel ==="
+          ls -la /tmp/wheels/
       
       - name: Test wheel
         run: |
@@ -138,16 +149,29 @@ jobs:
           ${{ steps.python.outputs.PYTHON }} -c "
           import libint2
           print(f'libint2 MAX_AM={libint2.MAX_AM}')
-          atom = libint2.Atom(1, [0.0, 0.0, 0.0])
-          shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-          print(f'Shell size={shell.size()}')
-          atoms = [libint2.Atom(1, [0.0, 0.0, 0.0]), libint2.Atom(1, [0.0, 0.0, 1.4])]
+          
+          # Quick sanity tests
+          s = libint2.Shell(0, [(1, 10)])
+          print(f'Shell size={s.size()}')
+          
+          import numpy as np
+          S = libint2.overlap().compute(s, s)
+          assert np.isclose(np.linalg.norm(S), 1.0), 'Overlap test failed'
+          print('Overlap OK')
+          
+          T = libint2.kinetic().compute(s, s)
+          assert np.isclose(np.linalg.norm(T), 1.5), 'Kinetic test failed'
+          print('Kinetic OK')
+          
+          # Test basis set loading
+          atoms = [(1, [0.0, 0.0, 0.0]), (1, [0.0, 0.0, 1.4])]
           try:
               basis = libint2.BasisSet('sto-3g', atoms)
               print(f'BasisSet nbf={basis.nbf}')
           except Exception as e:
               print(f'BasisSet: {e}')
-          print('OK')
+          
+          print('All tests passed!')
           "
       
       - name: Upload wheel artifact
@@ -197,37 +221,38 @@ jobs:
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
           tar xzf libint.tgz
       
-      - name: Build libint2 C++ library
+      - name: Configure and build libint2 with Python bindings
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
           mkdir -p build && cd build
+          
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
-            -DBUILD_SHARED_LIBS=ON
-          cmake --build . --parallel $(sysctl -n hw.ncpu)
-          cmake --install .
+            -DBUILD_SHARED_LIBS=ON \
+            -DLIBINT2_PYTHON=ON \
+            -DPython_EXECUTABLE=$(which python)
+          
+          cmake --build . --target libint2-python --parallel $(sysctl -n hw.ncpu)
       
-      - name: Patch pyproject.toml and build wheel
+      - name: Build Python wheel
         run: |
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}/build
+          
           python $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/python/pyproject.toml \
+            python/pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
             --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
           
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
-          export CMAKE_PREFIX_PATH="/tmp/libint2-install"
-          python -m build --wheel \
-            --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
+          cd python
+          python -m build --wheel
       
       - name: Add basis sets and repair wheel
         run: |
           python $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/build/python/dist/*.whl \
             --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
@@ -239,16 +264,12 @@ jobs:
           python -m pip install /tmp/wheels/*.whl
           python -c "
           import libint2
+          import numpy as np
           print(f'libint2 MAX_AM={libint2.MAX_AM}')
-          shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-          print(f'Shell size={shell.size()}')
-          atoms = [libint2.Atom(1, [0.0, 0.0, 0.0]), libint2.Atom(1, [0.0, 0.0, 1.4])]
-          try:
-              basis = libint2.BasisSet('sto-3g', atoms)
-              print(f'BasisSet nbf={basis.nbf}')
-          except Exception as e:
-              print(f'BasisSet: {e}')
-          print('OK')
+          s = libint2.Shell(0, [(1, 10)])
+          assert np.isclose(np.linalg.norm(libint2.overlap().compute(s, s)), 1.0)
+          assert np.isclose(np.linalg.norm(libint2.kinetic().compute(s, s)), 1.5)
+          print('All tests passed!')
           "
       
       - name: Upload wheel artifact
@@ -298,37 +319,38 @@ jobs:
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
           tar xzf libint.tgz
       
-      - name: Build libint2 C++ library
+      - name: Configure and build libint2 with Python bindings
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
           mkdir -p build-arm64 && cd build-arm64
+          
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/tmp/libint2-install \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DENABLE_FORTRAN=OFF \
             -DENABLE_XHOST=OFF \
-            -DBUILD_SHARED_LIBS=ON
-          cmake --build . --parallel $(sysctl -n hw.ncpu)
-          cmake --install .
+            -DBUILD_SHARED_LIBS=ON \
+            -DLIBINT2_PYTHON=ON \
+            -DPython_EXECUTABLE=$(which python)
+          
+          cmake --build . --target libint2-python --parallel $(sysctl -n hw.ncpu)
       
-      - name: Patch pyproject.toml and build wheel
+      - name: Build Python wheel
         run: |
+          cd /tmp/libint-${{ env.LIBINT_VERSION }}/build-arm64
+          
           python $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/python/pyproject.toml \
+            python/pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
             --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
           
-          cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
-          export CMAKE_PREFIX_PATH="/tmp/libint2-install"
-          python -m build --wheel \
-            --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-            --config-setting=cmake.define.CMAKE_PREFIX_PATH=/tmp/libint2-install
+          cd python
+          python -m build --wheel
       
       - name: Add basis sets and repair wheel
         run: |
           python $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
-            /tmp/libint-${{ env.LIBINT_VERSION }}/python/dist/*.whl \
+            /tmp/libint-${{ env.LIBINT_VERSION }}/build-arm64/python/dist/*.whl \
             --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
@@ -340,16 +362,12 @@ jobs:
           python -m pip install /tmp/wheels/*.whl
           python -c "
           import libint2
+          import numpy as np
           print(f'libint2 MAX_AM={libint2.MAX_AM}')
-          shell = libint2.Shell(0, [(1.0, 1.0)], [0.0, 0.0, 0.0])
-          print(f'Shell size={shell.size()}')
-          atoms = [libint2.Atom(1, [0.0, 0.0, 0.0]), libint2.Atom(1, [0.0, 0.0, 1.4])]
-          try:
-              basis = libint2.BasisSet('sto-3g', atoms)
-              print(f'BasisSet nbf={basis.nbf}')
-          except Exception as e:
-              print(f'BasisSet: {e}')
-          print('OK')
+          s = libint2.Shell(0, [(1, 10)])
+          assert np.isclose(np.linalg.norm(libint2.overlap().compute(s, s)), 1.0)
+          assert np.isclose(np.linalg.norm(libint2.kinetic().compute(s, s)), 1.5)
+          print('All tests passed!')
           "
       
       - name: Upload wheel artifact
