@@ -1,17 +1,20 @@
 # libint2-python-wheels configuration
 # 
-# This file documents the build configuration.
-# The actual build uses libint2's upstream scikit-build-core setup.
+# The workflow automatically detects the latest libint2 release
+# that has a precompiled tarball (libint-X.Y.Z.tgz).
+#
+# You can override by specifying a version in workflow_dispatch.
 
 libint:
-  version: "2.11.2"
-  source_url: "https://github.com/evaleev/libint/releases/download/v{version}/libint-{version}.tgz"
+  # Version is auto-detected from GitHub releases
+  # Only releases with precompiled tarballs are used
+  source_pattern: "https://github.com/evaleev/libint/releases/download/v{version}/libint-{version}.tgz"
 
 python:
-  # Python versions to build wheels for
   versions:
     linux: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     macos: ["3.10", "3.11", "3.12", "3.13"]
 
-# Build uses the upstream libint2 python/ directory with scikit-build-core
-# See: https://github.com/evaleev/libint/tree/master/python
+numpy:
+  # Default constraint for numba compatibility
+  constraint: "<2.4"

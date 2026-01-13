@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       libint_version:
-        description: 'libint2 version to build'
-        required: true
-        default: '2.11.2'
+        description: 'libint2 version (leave empty for latest)'
+        required: false
+        default: ''
         type: string
       numpy_constraint:
         description: 'Numpy version constraint'
@@ -32,15 +32,64 @@ on:
     - cron: '0 2 * * 0'
 
 env:
-  LIBINT_VERSION: ${{ inputs.libint_version || '2.11.2' }}
   NUMPY_CONSTRAINT: ${{ inputs.numpy_constraint || '<2.4' }}
 
 jobs:
+  # =============================================================================
+  # Detect latest libint2 version
+  # =============================================================================
+  get-version:
+    name: Get libint2 version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+      - name: Get latest libint2 release version
+        id: version
+        run: |
+          if [ -n "${{ inputs.libint_version }}" ]; then
+            VERSION="${{ inputs.libint_version }}"
+            echo "Using specified version: $VERSION"
+          else
+            # Fetch latest release that has a precompiled tarball
+            echo "Fetching latest libint2 release..."
+            
+            # Get releases and find latest with .tgz asset
+            RELEASES=$(curl -s "https://api.github.com/repos/evaleev/libint/releases?per_page=20")
+            
+            # Find the latest release that has a libint-X.Y.Z.tgz asset
+            VERSION=$(echo "$RELEASES" | jq -r '
+              .[] | 
+              select(.assets[].name | test("^libint-[0-9]+\\.[0-9]+\\.[0-9]+\\.tgz$")) |
+              .tag_name' | head -1 | sed 's/^v//')
+            
+            if [ -z "$VERSION" ]; then
+              echo "ERROR: Could not find a release with precompiled tarball"
+              exit 1
+            fi
+            
+            echo "Latest precompiled version: $VERSION"
+          fi
+          
+          # Verify the tarball exists
+          URL="https://github.com/evaleev/libint/releases/download/v${VERSION}/libint-${VERSION}.tgz"
+          HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$URL")
+          
+          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "302" ]; then
+            echo "ERROR: Tarball not found at $URL (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+          
+          echo "Verified: $URL"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
   # =============================================================================
   # Build Linux wheels using manylinux container
   # =============================================================================
   build-linux:
     name: Linux - Python ${{ matrix.python-version }}
+    needs: get-version
     runs-on: ubuntu-22.04
     container:
       image: quay.io/pypa/manylinux_2_28_x86_64
@@ -48,6 +97,9 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+    
+    env:
+      LIBINT_VERSION: ${{ needs.get-version.outputs.version }}
     
     steps:
       - name: Checkout repository
@@ -68,7 +120,7 @@ jobs:
       
       - name: Install system dependencies
         run: |
-          yum install -y cmake3 boost-devel eigen3-devel gmp-devel wget tar gzip
+          yum install -y cmake3 boost-devel eigen3-devel gmp-devel wget tar gzip jq
           ln -sf /usr/bin/cmake3 /usr/local/bin/cmake || true
       
       - name: Install Python build dependencies
@@ -76,26 +128,19 @@ jobs:
           ${{ steps.python.outputs.PYTHON }} -m pip install --upgrade pip
           ${{ steps.python.outputs.PYTHON }} -m pip install build wheel scikit-build-core "pybind11>=3.0.0" numpy
       
-      - name: Cache libint2 source
-        uses: actions/cache@v4
-        id: cache-source
-        with:
-          path: /tmp/libint-${{ env.LIBINT_VERSION }}
-          key: libint2-source-${{ env.LIBINT_VERSION }}
-      
       - name: Download libint2 source
-        if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
           cd /tmp
+          echo "Downloading libint2 v${{ env.LIBINT_VERSION }}..."
           wget -q "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz"
           tar xzf libint-${{ env.LIBINT_VERSION }}.tgz
+          echo "Download complete"
       
       - name: Configure and build libint2 with Python bindings
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}
           mkdir -p build && cd build
           
-          # Configure with Python bindings enabled
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
@@ -105,69 +150,46 @@ jobs:
             -DLIBINT2_PYTHON=ON \
             -DPython_EXECUTABLE=${{ steps.python.outputs.PYTHON }}
           
-          # Build the Python module
           cmake --build . --target libint2-python --parallel $(nproc)
-          
-          echo "=== Build complete ==="
-          ls -la python/ || true
       
       - name: Build Python wheel
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/build
           
-          # Patch pyproject.toml to add numpy dependency
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
             python/pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
             --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}"
           
-          # Build the wheel using the configured pyproject.toml
           cd python
           ${{ steps.python.outputs.PYTHON }} -m build --wheel
-          
-          echo "=== Built wheel ==="
-          ls -la dist/
       
       - name: Add basis sets and repair wheel
         run: |
-          # Add basis sets
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/add_basis_to_wheel.py \
             /tmp/libint-${{ env.LIBINT_VERSION }}/build/python/dist/*.whl \
             --basis-dir /tmp/libint-${{ env.LIBINT_VERSION }}/lib/basis \
             --output-dir /tmp/wheel-with-basis
           
-          # Repair for manylinux
           mkdir -p /tmp/wheels
           auditwheel repair /tmp/wheel-with-basis/*.whl -w /tmp/wheels/
-          
-          echo "=== Final wheel ==="
-          ls -la /tmp/wheels/
       
       - name: Test wheel
         run: |
           ${{ steps.python.outputs.PYTHON }} -m pip install /tmp/wheels/*.whl
           ${{ steps.python.outputs.PYTHON }} -c "
           import libint2
-          print(f'libint2 MAX_AM={libint2.MAX_AM}')
-          
-          # Quick sanity tests
-          s = libint2.Shell(0, [(1, 10)])
-          print(f'Shell size={s.size()}')
-          
           import numpy as np
-          S = libint2.overlap().compute(s, s)
-          assert np.isclose(np.linalg.norm(S), 1.0), 'Overlap test failed'
-          print('Overlap OK')
+          print(f'libint2 v${{ env.LIBINT_VERSION }} - MAX_AM={libint2.MAX_AM}')
           
-          T = libint2.kinetic().compute(s, s)
-          assert np.isclose(np.linalg.norm(T), 1.5), 'Kinetic test failed'
-          print('Kinetic OK')
+          s = libint2.Shell(0, [(1, 10)])
+          assert np.isclose(np.linalg.norm(libint2.overlap().compute(s, s)), 1.0)
+          assert np.isclose(np.linalg.norm(libint2.kinetic().compute(s, s)), 1.5)
           
-          # Test basis set loading
           atoms = [(1, [0.0, 0.0, 0.0]), (1, [0.0, 0.0, 1.4])]
           try:
               basis = libint2.BasisSet('sto-3g', atoms)
-              print(f'BasisSet nbf={basis.nbf}')
+              print(f'BasisSet OK: nbf={basis.nbf}')
           except Exception as e:
               print(f'BasisSet: {e}')
           
@@ -186,11 +208,15 @@ jobs:
   # =============================================================================
   build-macos-x86:
     name: macOS x86_64 - Python ${{ matrix.python-version }}
+    needs: get-version
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13']
+    
+    env:
+      LIBINT_VERSION: ${{ needs.get-version.outputs.version }}
     
     steps:
       - name: Checkout repository
@@ -207,15 +233,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build wheel scikit-build-core "pybind11>=3.0.0" numpy delocate
       
-      - name: Cache libint2 source
-        uses: actions/cache@v4
-        id: cache-source
-        with:
-          path: /tmp/libint-${{ env.LIBINT_VERSION }}
-          key: libint2-source-${{ env.LIBINT_VERSION }}
-      
       - name: Download libint2 source
-        if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
           cd /tmp
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
@@ -265,7 +283,7 @@ jobs:
           python -c "
           import libint2
           import numpy as np
-          print(f'libint2 MAX_AM={libint2.MAX_AM}')
+          print(f'libint2 v${{ env.LIBINT_VERSION }} - MAX_AM={libint2.MAX_AM}')
           s = libint2.Shell(0, [(1, 10)])
           assert np.isclose(np.linalg.norm(libint2.overlap().compute(s, s)), 1.0)
           assert np.isclose(np.linalg.norm(libint2.kinetic().compute(s, s)), 1.5)
@@ -284,11 +302,15 @@ jobs:
   # =============================================================================
   build-macos-arm64:
     name: macOS ARM64 - Python ${{ matrix.python-version }}
+    needs: get-version
     runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13']
+    
+    env:
+      LIBINT_VERSION: ${{ needs.get-version.outputs.version }}
     
     steps:
       - name: Checkout repository
@@ -305,15 +327,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build wheel scikit-build-core "pybind11>=3.0.0" numpy delocate
       
-      - name: Cache libint2 source
-        uses: actions/cache@v4
-        id: cache-source
-        with:
-          path: /tmp/libint-${{ env.LIBINT_VERSION }}
-          key: libint2-source-${{ env.LIBINT_VERSION }}
-      
       - name: Download libint2 source
-        if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
           cd /tmp
           curl -sL "https://github.com/evaleev/libint/releases/download/v${{ env.LIBINT_VERSION }}/libint-${{ env.LIBINT_VERSION }}.tgz" -o libint.tgz
@@ -363,7 +377,7 @@ jobs:
           python -c "
           import libint2
           import numpy as np
-          print(f'libint2 MAX_AM={libint2.MAX_AM}')
+          print(f'libint2 v${{ env.LIBINT_VERSION }} - MAX_AM={libint2.MAX_AM}')
           s = libint2.Shell(0, [(1, 10)])
           assert np.isclose(np.linalg.norm(libint2.overlap().compute(s, s)), 1.0)
           assert np.isclose(np.linalg.norm(libint2.kinetic().compute(s, s)), 1.5)
@@ -382,11 +396,14 @@ jobs:
   # =============================================================================
   release:
     name: Create Release
-    needs: [build-linux, build-macos-x86, build-macos-arm64]
+    needs: [get-version, build-linux, build-macos-x86, build-macos-arm64]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
+    
+    env:
+      LIBINT_VERSION: ${{ needs.get-version.outputs.version }}
     
     steps:
       - name: Download all wheel artifacts
@@ -420,7 +437,7 @@ jobs:
   # =============================================================================
   publish-pypi:
     name: Publish to PyPI
-    needs: [build-linux, build-macos-x86, build-macos-arm64]
+    needs: [get-version, build-linux, build-macos-x86, build-macos-arm64]
     runs-on: ubuntu-latest
     if: inputs.publish_pypi == true
     environment:
@@ -442,7 +459,7 @@ jobs:
 
   publish-test-pypi:
     name: Publish to Test PyPI
-    needs: [build-linux, build-macos-x86, build-macos-arm64]
+    needs: [get-version, build-linux, build-macos-x86, build-macos-arm64]
     runs-on: ubuntu-latest
     if: inputs.publish_test_pypi == true
     environment:
