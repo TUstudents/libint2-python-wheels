@@ -1,0 +1,42 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+build_wheel/
+wheels/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.dylib
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Logs
+*.log
+
+# Downloaded sources
+libint-*.tgz
+libint-*/

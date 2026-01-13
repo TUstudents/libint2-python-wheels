@@ -1,0 +1,37 @@
+# libint2-python-wheels configuration
+# Edit these values to customize builds
+
+libint:
+  version: "2.11.2"
+  # Source URL pattern - {version} will be replaced
+  source_url: "https://github.com/evaleev/libint/releases/download/v{version}/libint-{version}.tgz"
+  
+  # Build options
+  build_options:
+    # Maximum angular momentum for different integral types
+    max_am_eri: 6        # 4-center 2-body integrals (ERI)
+    max_am_eri3: 6       # 3-center 2-body integrals  
+    max_am_eri2: 6       # 2-center 2-body integrals
+    max_am_onebody: 6    # 1-body integrals
+    # Derivative orders
+    eri_deriv_order: 2   # ERI derivative order
+    onebody_deriv_order: 2
+    # Optional: contracted integrals support
+    contracted_ints: true
+
+python:
+  # Python versions to build wheels for
+  versions:
+    linux: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    macos: ["3.10", "3.11", "3.12", "3.13"]
+  
+  # Numpy version constraint
+  numpy_constraint: "<2.4"
+
+packaging:
+  # Package name on PyPI (if different from libint2)
+  name: "libint2"
+  # Include basis set data
+  include_basis_sets: true
+  # Basis set path within package
+  basis_set_path: "share/libint"

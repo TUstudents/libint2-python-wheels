@@ -1,0 +1,421 @@
+name: Build libint2 Python Wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      libint_version:
+        description: 'libint2 version to build'
+        required: true
+        default: '2.11.2'
+        type: string
+      numpy_constraint:
+        description: 'Numpy version constraint'
+        required: true
+        default: '<2.4'
+        type: string
+      publish_pypi:
+        description: 'Publish to PyPI'
+        required: false
+        default: false
+        type: boolean
+      publish_test_pypi:
+        description: 'Publish to Test PyPI'
+        required: false
+        default: false
+        type: boolean
+  
+  push:
+    tags:
+      - 'v*'
+  
+  # Weekly builds to catch any issues
+  schedule:
+    - cron: '0 2 * * 0'  # Sundays at 2 AM UTC
+
+env:
+  LIBINT_VERSION: ${{ inputs.libint_version || '2.11.2' }}
+  NUMPY_CONSTRAINT: ${{ inputs.numpy_constraint || '<2.4' }}
+
+jobs:
+  # =============================================================================
+  # Build Linux wheels using manylinux container
+  # =============================================================================
+  build-linux:
+    name: Linux - Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set Python version paths
+        id: python
+        run: |
+          case "${{ matrix.python-version }}" in
+            3.9)  echo "PYTHON=/opt/python/cp39-cp39/bin/python" >> $GITHUB_OUTPUT ;;
+            3.10) echo "PYTHON=/opt/python/cp310-cp310/bin/python" >> $GITHUB_OUTPUT ;;
+            3.11) echo "PYTHON=/opt/python/cp311-cp311/bin/python" >> $GITHUB_OUTPUT ;;
+            3.12) echo "PYTHON=/opt/python/cp312-cp312/bin/python" >> $GITHUB_OUTPUT ;;
+            3.13) echo "PYTHON=/opt/python/cp313-cp313/bin/python" >> $GITHUB_OUTPUT ;;
+          esac
+      
+      - name: Install system dependencies
+        run: |
+          yum install -y \
+            cmake3 \
+            boost-devel \
+            eigen3-devel \
+            gmp-devel \
+            wget \
+            tar \
+            gzip
+          
+          # Ensure cmake is available as 'cmake'
+          alternatives --install /usr/local/bin/cmake cmake /usr/bin/cmake3 10 || true
+      
+      - name: Cache libint2 build
+        uses: actions/cache@v4
+        id: cache-libint
+        with:
+          path: /tmp/libint2-install
+          key: libint2-${{ env.LIBINT_VERSION }}-linux-x86_64-${{ hashFiles('scripts/build_libint2.sh') }}
+      
+      - name: Download and build libint2
+        if: steps.cache-libint.outputs.cache-hit != 'true'
+        run: |
+          chmod +x scripts/build_libint2.sh
+          PYTHON=${{ steps.python.outputs.PYTHON }} \
+          LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
+          INSTALL_PREFIX=/tmp/libint2-install \
+            scripts/build_libint2.sh
+      
+      - name: Build Python wheel
+        run: |
+          ${{ steps.python.outputs.PYTHON }} -m pip install --upgrade pip build wheel setuptools pybind11 numpy
+          
+          # Prepare package directory
+          mkdir -p build_wheel/libint2
+          
+          # Copy installed files
+          cp -r /tmp/libint2-install/* build_wheel/libint2/
+          
+          # Generate pyproject.toml
+          ${{ steps.python.outputs.PYTHON }} scripts/patch_pyproject.py \
+            --version "${{ env.LIBINT_VERSION }}" \
+            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}" \
+            --output build_wheel/pyproject.toml
+          
+          # Copy __init__.py
+          cp package_template/libint2/__init__.py build_wheel/libint2/
+          
+          cd build_wheel
+          ${{ steps.python.outputs.PYTHON }} -m build --wheel
+          
+          # Repair wheel for manylinux compliance
+          auditwheel repair dist/*.whl -w /tmp/wheels/
+      
+      - name: Test wheel
+        run: |
+          ${{ steps.python.outputs.PYTHON }} -m pip install /tmp/wheels/*.whl
+          ${{ steps.python.outputs.PYTHON }} -c "import libint2; print(f'libint2 version: {libint2.__version__}')"
+          # Run basic functionality test
+          ${{ steps.python.outputs.PYTHON }} -c "
+          import libint2
+          libint2.initialize()
+          print('libint2 initialized successfully')
+          libint2.finalize()
+          print('libint2 finalized successfully')
+          "
+      
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-py${{ matrix.python-version }}
+          path: /tmp/wheels/*.whl
+          retention-days: 7
+
+  # =============================================================================
+  # Build macOS x86_64 wheels
+  # =============================================================================
+  build-macos-x86:
+    name: macOS x86_64 - Python ${{ matrix.python-version }}
+    runs-on: macos-13
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install system dependencies
+        run: |
+          brew install cmake boost eigen gmp
+      
+      - name: Cache libint2 build
+        uses: actions/cache@v4
+        id: cache-libint
+        with:
+          path: /tmp/libint2-install
+          key: libint2-${{ env.LIBINT_VERSION }}-macos-x86_64-py${{ matrix.python-version }}-${{ hashFiles('scripts/build_libint2.sh') }}
+      
+      - name: Download and build libint2
+        if: steps.cache-libint.outputs.cache-hit != 'true'
+        run: |
+          chmod +x scripts/build_libint2.sh
+          PYTHON=$(which python) \
+          LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
+          INSTALL_PREFIX=/tmp/libint2-install \
+            scripts/build_libint2.sh
+      
+      - name: Build Python wheel
+        run: |
+          python -m pip install --upgrade pip build wheel setuptools pybind11 numpy delocate
+          
+          mkdir -p build_wheel/libint2
+          cp -r /tmp/libint2-install/* build_wheel/libint2/
+          
+          python scripts/patch_pyproject.py \
+            --version "${{ env.LIBINT_VERSION }}" \
+            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}" \
+            --output build_wheel/pyproject.toml
+          
+          cp package_template/libint2/__init__.py build_wheel/libint2/
+          
+          cd build_wheel
+          python -m build --wheel
+          
+          # Fix wheel for macOS
+          delocate-wheel -w /tmp/wheels/ dist/*.whl
+      
+      - name: Test wheel
+        run: |
+          python -m pip install /tmp/wheels/*.whl
+          python -c "import libint2; print(f'libint2 version: {libint2.__version__}')"
+          python -c "
+          import libint2
+          libint2.initialize()
+          print('libint2 initialized successfully')
+          libint2.finalize()
+          print('libint2 finalized successfully')
+          "
+      
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-macos-x86_64-py${{ matrix.python-version }}
+          path: /tmp/wheels/*.whl
+          retention-days: 7
+
+  # =============================================================================
+  # Build macOS ARM64 wheels
+  # =============================================================================
+  build-macos-arm64:
+    name: macOS ARM64 - Python ${{ matrix.python-version }}
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install system dependencies
+        run: |
+          brew install cmake boost eigen gmp
+      
+      - name: Cache libint2 build
+        uses: actions/cache@v4
+        id: cache-libint
+        with:
+          path: /tmp/libint2-install
+          key: libint2-${{ env.LIBINT_VERSION }}-macos-arm64-py${{ matrix.python-version }}-${{ hashFiles('scripts/build_libint2.sh') }}
+      
+      - name: Download and build libint2
+        if: steps.cache-libint.outputs.cache-hit != 'true'
+        run: |
+          chmod +x scripts/build_libint2.sh
+          PYTHON=$(which python) \
+          LIBINT_VERSION=${{ env.LIBINT_VERSION }} \
+          INSTALL_PREFIX=/tmp/libint2-install \
+            scripts/build_libint2.sh
+      
+      - name: Build Python wheel
+        run: |
+          python -m pip install --upgrade pip build wheel setuptools pybind11 numpy delocate
+          
+          mkdir -p build_wheel/libint2
+          cp -r /tmp/libint2-install/* build_wheel/libint2/
+          
+          python scripts/patch_pyproject.py \
+            --version "${{ env.LIBINT_VERSION }}" \
+            --numpy-constraint "${{ env.NUMPY_CONSTRAINT }}" \
+            --output build_wheel/pyproject.toml
+          
+          cp package_template/libint2/__init__.py build_wheel/libint2/
+          
+          cd build_wheel
+          python -m build --wheel
+          
+          delocate-wheel -w /tmp/wheels/ dist/*.whl
+      
+      - name: Test wheel
+        run: |
+          python -m pip install /tmp/wheels/*.whl
+          python -c "import libint2; print(f'libint2 version: {libint2.__version__}')"
+          python -c "
+          import libint2
+          libint2.initialize()
+          print('libint2 initialized successfully')
+          libint2.finalize()
+          print('libint2 finalized successfully')
+          "
+      
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-macos-arm64-py${{ matrix.python-version }}
+          path: /tmp/wheels/*.whl
+          retention-days: 7
+
+  # =============================================================================
+  # Create GitHub Release
+  # =============================================================================
+  release:
+    name: Create Release
+    needs: [build-linux, build-macos-x86, build-macos-arm64]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: wheels/
+          merge-multiple: true
+      
+      - name: List wheels
+        run: ls -la wheels/
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: libint2 ${{ env.LIBINT_VERSION }}
+          body: |
+            ## libint2 Python Wheels v${{ env.LIBINT_VERSION }}
+            
+            Pre-built Python wheels for libint2 ${{ env.LIBINT_VERSION }}.
+            
+            ### Installation
+            
+            Download the appropriate wheel for your platform and Python version, then:
+            
+            ```bash
+            pip install libint2-${{ env.LIBINT_VERSION }}-<platform>.whl
+            ```
+            
+            Or install directly from URL:
+            
+            ```bash
+            pip install "libint2 @ https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/<wheel-filename>.whl"
+            ```
+            
+            ### Supported Platforms
+            
+            - Linux x86_64 (manylinux_2_28)
+            - macOS x86_64 (Intel)
+            - macOS ARM64 (Apple Silicon)
+            
+            ### Python Versions
+            
+            - Linux: 3.9, 3.10, 3.11, 3.12, 3.13
+            - macOS: 3.10, 3.11, 3.12, 3.13
+            
+            ### Numpy Constraint
+            
+            These wheels require `numpy${{ env.NUMPY_CONSTRAINT }}`.
+          files: wheels/*.whl
+          draft: false
+          prerelease: false
+
+  # =============================================================================
+  # Publish to PyPI (optional)
+  # =============================================================================
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build-linux, build-macos-x86, build-macos-arm64]
+    runs-on: ubuntu-latest
+    if: inputs.publish_pypi == true
+    
+    environment:
+      name: pypi
+      url: https://pypi.org/p/libint2
+    
+    permissions:
+      id-token: write
+    
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist/
+          merge-multiple: true
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # =============================================================================
+  # Publish to Test PyPI (optional)
+  # =============================================================================
+  publish-test-pypi:
+    name: Publish to Test PyPI
+    needs: [build-linux, build-macos-x86, build-macos-arm64]
+    runs-on: ubuntu-latest
+    if: inputs.publish_test_pypi == true
+    
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/libint2
+    
+    permissions:
+      id-token: write
+    
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist/
+          merge-multiple: true
+      
+      - name: Publish to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
