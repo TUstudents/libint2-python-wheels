@@ -29,7 +29,7 @@ on:
       - 'v*'
   
   schedule:
-    - cron: '0 2 * * 0'
+    - cron: '0 2 1 * *'  # First day of each month at 2 AM UTC
 
 env:
   NUMPY_CONSTRAINT: ${{ inputs.numpy_constraint || '<2.4' }}
