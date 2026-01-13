@@ -35,8 +35,8 @@ uv add "libint2 @ https://github.com/YOUR_USERNAME/libint2-python-wheels/release
 | Platform | Architecture | Python Versions |
 |----------|--------------|-----------------|
 | Linux (manylinux_2_28) | x86_64 | 3.9, 3.10, 3.11, 3.12, 3.13 |
-| macOS 13+ | x86_64 (Intel) | 3.10, 3.11, 3.12, 3.13 |
-| macOS 14+ | ARM64 (Apple Silicon) | 3.10, 3.11, 3.12, 3.13 |
+| macOS 15 | x86_64 (Intel) | 3.10, 3.11, 3.12, 3.13 |
+| macOS 15 | ARM64 (Apple Silicon) | 3.10, 3.11, 3.12, 3.13 |
 
 ## Usage
 

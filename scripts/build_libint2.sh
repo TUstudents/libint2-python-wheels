@@ -27,14 +27,14 @@ echo "Install prefix: ${INSTALL_PREFIX}"
 echo "Parallel jobs: ${NPROC}"
 echo ""
 
-# Get Python include and library paths
-PYTHON_INCLUDE=$("${PYTHON}" -c "import sysconfig; print(sysconfig.get_path('include'))")
-PYTHON_LIBRARY=$("${PYTHON}" -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
+# Get Python info
 PYTHON_VERSION=$("${PYTHON}" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PYTHON_IMPL=$("${PYTHON}" -c "import sys; print(sys.implementation.name)")
+PYTHON_SOABI=$("${PYTHON}" -c "import sysconfig; print(sysconfig.get_config_var('SOABI') or '')")
 
-echo "Python include: ${PYTHON_INCLUDE}"
-echo "Python library: ${PYTHON_LIBRARY}"
 echo "Python version: ${PYTHON_VERSION}"
+echo "Python implementation: ${PYTHON_IMPL}"
+echo "Python SOABI: ${PYTHON_SOABI}"
 echo ""
 
 # Install Python dependencies
@@ -81,7 +81,6 @@ cmake .. \
     -DLIBINT2_ENABLE_PYTHON=ON \
     -Dpybind11_DIR="${PYBIND11_CMAKE}" \
     -DPython_EXECUTABLE="${PYTHON}" \
-    -DPython_INCLUDE_DIRS="${PYTHON_INCLUDE}" \
     -DENABLE_XHOST=OFF \
     -DBUILD_SHARED_LIBS=ON \
     -DLIBINT2_BUILD_SHARED_AND_STATIC_LIBS=OFF
@@ -94,13 +93,70 @@ cmake --build . --parallel "${NPROC}"
 echo "Installing to ${INSTALL_PREFIX}..."
 cmake --install .
 
+# Find the Python extension module
+echo ""
+echo "=============================================="
+echo "Locating Python extension module..."
+echo "=============================================="
+
+# The Python module is typically installed to lib/pythonX.Y/site-packages/
+SITE_PACKAGES="${INSTALL_PREFIX}/lib/python${PYTHON_VERSION}/site-packages"
+PYTHON_MODULE_DIR="${INSTALL_PREFIX}/python_module"
+mkdir -p "${PYTHON_MODULE_DIR}"
+
+# Find the .so file (could be libint2.cpython-XXX.so or similar)
+echo "Searching for Python extension..."
+find "${INSTALL_PREFIX}" -name "*.so" -type f 2>/dev/null | while read -r so_file; do
+    echo "  Found: ${so_file}"
+done
+
+# Copy the Python extension to our module directory
+if [ -d "${SITE_PACKAGES}" ]; then
+    echo "Copying from site-packages..."
+    cp -r "${SITE_PACKAGES}"/* "${PYTHON_MODULE_DIR}/" 2>/dev/null || true
+fi
+
+# Also check lib directory directly
+find "${INSTALL_PREFIX}/lib" -maxdepth 1 -name "*libint2*.so" -type f 2>/dev/null | while read -r so_file; do
+    cp "${so_file}" "${PYTHON_MODULE_DIR}/" 2>/dev/null || true
+done
+
+# Look for the pybind11 module specifically
+find "${INSTALL_PREFIX}" -name "*libint2*${PYTHON_SOABI}*.so" -type f 2>/dev/null | head -1 | while read -r so_file; do
+    if [ -n "${so_file}" ]; then
+        echo "Found pybind11 module: ${so_file}"
+        cp "${so_file}" "${PYTHON_MODULE_DIR}/"
+    fi
+done
+
 # Copy basis sets
+echo ""
 echo "Copying basis sets..."
-LIBINT_BASIS_DIR="${INSTALL_PREFIX}/share/libint/${LIBINT_VERSION}/basis"
+LIBINT_BASIS_DIR="${PYTHON_MODULE_DIR}/share/libint/${LIBINT_VERSION}/basis"
 mkdir -p "${LIBINT_BASIS_DIR}"
 if [ -d "../lib/basis" ]; then
     cp -r ../lib/basis/* "${LIBINT_BASIS_DIR}/" 2>/dev/null || true
 fi
+
+# Also copy from installed share directory
+if [ -d "${INSTALL_PREFIX}/share/libint" ]; then
+    cp -r "${INSTALL_PREFIX}/share/libint"/* "${PYTHON_MODULE_DIR}/share/libint/" 2>/dev/null || true
+fi
+
+# Copy the core library (.so) that the Python module links against
+echo ""
+echo "Copying shared libraries..."
+mkdir -p "${PYTHON_MODULE_DIR}/lib"
+find "${INSTALL_PREFIX}/lib" -maxdepth 1 -name "libint2*.so*" -type f 2>/dev/null | while read -r lib; do
+    echo "  Copying: ${lib}"
+    cp -P "${lib}" "${PYTHON_MODULE_DIR}/lib/" 2>/dev/null || true
+done
+
+# Also handle symlinks
+find "${INSTALL_PREFIX}/lib" -maxdepth 1 -name "libint2*.so*" -type l 2>/dev/null | while read -r lib; do
+    echo "  Copying symlink: ${lib}"
+    cp -P "${lib}" "${PYTHON_MODULE_DIR}/lib/" 2>/dev/null || true
+done
 
 # Verify installation
 echo ""
@@ -108,26 +164,16 @@ echo "=============================================="
 echo "Installation complete!"
 echo "=============================================="
 echo ""
-echo "Installed files:"
-ls -la "${INSTALL_PREFIX}/"
+echo "Python module directory contents:"
+find "${PYTHON_MODULE_DIR}" -type f | head -30
 
-if [ -d "${INSTALL_PREFIX}/lib" ]; then
-    echo ""
-    echo "Libraries:"
-    ls -la "${INSTALL_PREFIX}/lib/"
-fi
-
-if [ -d "${INSTALL_PREFIX}/lib/python${PYTHON_VERSION}" ]; then
-    echo ""
-    echo "Python bindings:"
-    find "${INSTALL_PREFIX}/lib/python${PYTHON_VERSION}" -name "*.so" -o -name "*.dylib" 2>/dev/null || true
-fi
-
-# Test import
 echo ""
-echo "Testing Python import..."
-export PYTHONPATH="${INSTALL_PREFIX}/lib/python${PYTHON_VERSION}/site-packages:${PYTHONPATH:-}"
-"${PYTHON}" -c "import libint2; print(f'libint2 imported successfully')" && echo "SUCCESS!" || echo "FAILED - will fix during wheel packaging"
+echo "Looking for .so files:"
+find "${PYTHON_MODULE_DIR}" -name "*.so*" -type f
+
+# Save the module location for the wheel build step
+echo "${PYTHON_MODULE_DIR}" > "${INSTALL_PREFIX}/python_module_path.txt"
 
 echo ""
 echo "Build completed successfully!"
+echo "Python module directory: ${PYTHON_MODULE_DIR}"
