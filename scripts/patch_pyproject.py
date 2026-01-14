@@ -26,6 +26,14 @@ def patch_pyproject(input_path: Path, output_path: Path, version: str, numpy_con
         # Remove the readme line entirely
         content = re.sub(r'^readme\s*=\s*"[^"]*"\s*\n', '', content, flags=re.MULTILINE)
         print("  Removed readme reference (file not found)")
+        
+    # Fix invalid classifier
+    if "Development Status :: Stable" in content:
+        content = content.replace(
+            "Development Status :: Stable",
+            "Development Status :: 5 - Production/Stable"
+        )
+        print("  Fixed invalid classifier")
     
     # Add numpy dependency if not present
     if "numpy" not in content:
