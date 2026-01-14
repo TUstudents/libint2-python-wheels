@@ -76,15 +76,25 @@ def add_basis_to_wheel(wheel_path: Path, basis_dir: Path, output_dir: Path) -> P
         print(f"  Copied basis files to {basis_dest.relative_to(unpack_dir)}")
         
         # Add __init__.py to make the package importable
-        # The extension module is named libint2.cpython-*.so, we need to re-export from it
+        # Set LIBINT_DATA_PATH so the library can find basis files at runtime
         init_path = pkg_dir / "__init__.py"
         if not init_path.exists():
             init_content = '''# Auto-generated __init__.py for libint2 package
+import os as _os
+from pathlib import Path as _Path
+
+# Set LIBINT_DATA_PATH to the bundled basis files location
+# This overrides the hardcoded build-time path
+_pkg_dir = _Path(__file__).parent
+_data_path = _pkg_dir / "share" / "libint"
+if _data_path.exists():
+    _os.environ.setdefault("LIBINT_DATA_PATH", str(_data_path))
+
 # Re-export everything from the C++ extension module
 from .libint2 import *
 '''
             init_path.write_text(init_content)
-            print(f"  Added __init__.py to re-export from extension module")
+            print(f"  Added __init__.py with LIBINT_DATA_PATH setup")
         
         # Update the RECORD file
         dist_info = None
