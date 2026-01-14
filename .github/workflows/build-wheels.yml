@@ -36,21 +36,29 @@ env:
 
 jobs:
   # =============================================================================
-  # Detect latest libint2 version
+  # Detect libint2 version (from tag, input, or latest)
   # =============================================================================
   get-version:
     name: Get libint2 version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.version.outputs.should_release }}
     
     steps:
-      - name: Get latest libint2 release version
+      - name: Get libint2 version
         id: version
         run: |
-          if [ -n "${{ inputs.libint_version }}" ]; then
+          # Priority: 1) Tag, 2) Input, 3) Latest
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # Extract version from tag (e.g., v2.11.2 -> 2.11.2)
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "Using version from tag: $VERSION"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          elif [ -n "${{ inputs.libint_version }}" ]; then
             VERSION="${{ inputs.libint_version }}"
             echo "Using specified version: $VERSION"
+            echo "should_release=false" >> $GITHUB_OUTPUT
           else
             echo "Fetching latest libint2 release..."
             RELEASES=$(curl -s "https://api.github.com/repos/evaleev/libint/releases?per_page=20")
@@ -64,6 +72,7 @@ jobs:
               exit 1
             fi
             echo "Latest precompiled version: $VERSION"
+            echo "should_release=false" >> $GITHUB_OUTPUT
           fi
           
           URL="https://github.com/evaleev/libint/releases/download/v${VERSION}/libint-${VERSION}.tgz"
@@ -434,7 +443,7 @@ jobs:
     name: Create Release
     needs: [get-version, build-linux, build-macos-x86, build-macos-arm64]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: needs.get-version.outputs.should_release == 'true'
     permissions:
       contents: write
     
@@ -452,6 +461,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: v${{ env.LIBINT_VERSION }}
           name: libint2 ${{ env.LIBINT_VERSION }}
           body: |
             ## libint2 Python Wheels v${{ env.LIBINT_VERSION }}
