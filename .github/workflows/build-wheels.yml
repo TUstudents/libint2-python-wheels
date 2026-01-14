@@ -48,17 +48,19 @@ jobs:
     steps:
       - name: Get libint2 version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Priority: 1) Tag, 2) Input, 3) Latest
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             # Extract version from tag (e.g., v2.11.2 -> 2.11.2)
             VERSION="${GITHUB_REF#refs/tags/v}"
             echo "Using version from tag: $VERSION"
-            echo "should_release=true" >> $GITHUB_OUTPUT
+            SHOULD_RELEASE=true
           elif [ -n "${{ inputs.libint_version }}" ]; then
             VERSION="${{ inputs.libint_version }}"
             echo "Using specified version: $VERSION"
-            echo "should_release=false" >> $GITHUB_OUTPUT
+            SHOULD_RELEASE=false
           else
             echo "Fetching latest libint2 release..."
             RELEASES=$(curl -s "https://api.github.com/repos/evaleev/libint/releases?per_page=20")
@@ -72,7 +74,22 @@ jobs:
               exit 1
             fi
             echo "Latest precompiled version: $VERSION"
-            echo "should_release=false" >> $GITHUB_OUTPUT
+            
+            # For scheduled runs, check if we already have a release for this version
+            if [[ "${{ github.event_name }}" == "schedule" ]]; then
+              # Check if release already exists in our repo
+              EXISTING=$(curl -s -o /dev/null -w "%{http_code}" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${VERSION}")
+              if [ "$EXISTING" == "200" ]; then
+                echo "Release v${VERSION} already exists, skipping release creation"
+                SHOULD_RELEASE=false
+              else
+                echo "New version detected, will create release"
+                SHOULD_RELEASE=true
+              fi
+            else
+              SHOULD_RELEASE=false
+            fi
           fi
           
           URL="https://github.com/evaleev/libint/releases/download/v${VERSION}/libint-${VERSION}.tgz"
@@ -85,6 +102,7 @@ jobs:
           
           echo "Verified: $URL"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
 
   # =============================================================================
   # Build Linux wheels using manylinux container
