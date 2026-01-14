@@ -488,7 +488,12 @@ jobs:
             
             ### Installation
             ```bash
-            pip install "libint2 @ https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/<wheel>.whl"
+            pip install libint2
+            ```
+            
+            Or from GitHub release:
+            ```bash
+            pip install "libint2 @ https://github.com/${{ github.repository }}/releases/download/v${{ env.LIBINT_VERSION }}/<wheel>.whl"
             ```
             
             ### Platforms
