@@ -8,6 +8,19 @@ Pre-built Python wheels for [libint2](https://github.com/evaleev/libint) - a hig
 
 ## Installation
 
+### From Pypi
+
+With uv (recommended)
+
+```bash
+uv add libint2
+```
+
+With pip
+```bash
+pip install libint2
+```
+
 ### From GitHub Releases
 
 Download the appropriate wheel for your platform from the [Releases page](https://github.com/TUstudents/libint2-python-wheels/releases), then:
