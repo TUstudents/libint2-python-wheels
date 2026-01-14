@@ -509,13 +509,16 @@ jobs:
           files: wheels/*.whl
 
   # =============================================================================
-  # Publish to PyPI (optional)
+  # Publish to PyPI
   # =============================================================================
   publish-pypi:
     name: Publish to PyPI
     needs: [get-version, build-linux, build-macos-x86, build-macos-arm64]
     runs-on: ubuntu-latest
-    if: inputs.publish_pypi == true
+    # Publish when: tag push, scheduled new version, or manual with checkbox
+    if: |
+      needs.get-version.outputs.should_release == 'true' ||
+      inputs.publish_pypi == true
     environment:
       name: pypi
       url: https://pypi.org/p/libint2
