@@ -11,7 +11,7 @@ on:
       numpy_constraint:
         description: 'Numpy version constraint'
         required: true
-        default: '<2.4'
+        default: '>=2.0,<2.4'
         type: string
       py39:
         description: 'Build Python 3.9 (Linux only)'
@@ -62,7 +62,7 @@ on:
     - cron: '0 2 1 * *'  # First day of each month at 2 AM UTC
 
 env:
-  NUMPY_CONSTRAINT: ${{ inputs.numpy_constraint || '<2.4' }}
+  NUMPY_CONSTRAINT: ${{ inputs.numpy_constraint || '>=2.0,<2.4' }}
 
 jobs:
   # =============================================================================
