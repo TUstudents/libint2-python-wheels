@@ -192,6 +192,9 @@ jobs:
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
+          # Copy PyPI README so it's included in the wheel metadata
+          cp $GITHUB_WORKSPACE/README_PyPI.md README.md
+          
           # Patch pyproject.toml for version and numpy dependency
           ${{ steps.python.outputs.PYTHON }} $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
             pyproject.toml \
@@ -312,6 +315,8 @@ jobs:
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
+          # Copy PyPI README so it's included in the wheel metadata
+          cp $GITHUB_WORKSPACE/README_PyPI.md README.md
           python $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
             pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
@@ -414,6 +419,8 @@ jobs:
         run: |
           cd /tmp/libint-${{ env.LIBINT_VERSION }}/python
           
+          # Copy PyPI README so it's included in the wheel metadata
+          cp $GITHUB_WORKSPACE/README_PyPI.md README.md
           python $GITHUB_WORKSPACE/scripts/patch_pyproject.py \
             pyproject.toml \
             --version "${{ env.LIBINT_VERSION }}" \
